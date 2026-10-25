@@ -1,0 +1,7 @@
+pub struct Point { x: int, y: int }
+fn offset(value: int, amount: int) -> int { return value + amount; }
+pub fn shifted(point: Point, dx: int) -> Point {
+    var result = point;
+    result.x = offset(point.x, dx);
+    return result;
+}

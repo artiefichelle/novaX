@@ -1,0 +1,8 @@
+import "module_geometry.nx" as geometry;
+fn main() -> int {
+    let point: geometry::Point = new geometry::Point {x: 10, y: 20};
+    let moved = geometry::shifted(point, 5);
+    print(point.x);
+    print(moved.x);
+    return 0;
+}
