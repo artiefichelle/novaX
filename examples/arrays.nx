@@ -1,0 +1,17 @@
+fn main() -> int {
+    var values: int[4] = [10, 20, 30, 40];
+    let original = values; // Value copy; later mutations do not affect this array.
+    values[1] = 25;
+
+    var index = 0;
+    var total = 0;
+    while index < len(values) {
+        total += values[index];
+        index += 1;
+    }
+    print(total);
+    print(original[1]);
+    print(values[1]);
+    print(len(values));
+    return 0;
+}
