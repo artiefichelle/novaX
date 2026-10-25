@@ -8,7 +8,7 @@ from llvmlite import binding
 import json
 import tempfile
 
-VERSION="0.8.0"
+VERSION="0.9.0"
 
 from frontend import CompileError, analyze_source, optimize_program
 from backend import Compiler

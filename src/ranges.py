@@ -5,7 +5,7 @@ control falls back to unknown values. No runtime safety check is removed here.
 """
 from dataclasses import dataclass
 from frontend import (Literal, Name, Binary, Unary, Call, Index, ArrayLiteral,
-                      ArrayType, Decl, Assign, IndexAssign, While, If, Print,
+                      ArrayType, StructType, StructLiteral, Field, FieldAssign, Decl, Assign, IndexAssign, While, If, Print,
                       Return, ExprStmt)
 
 LOW, HIGH = -2147483648, 2147483647
@@ -72,6 +72,11 @@ class RangeAnalysis:
             if expr.typ == 'int': fact = (expr.value, expr.value)
         elif isinstance(expr, Name):
             fact = self.lookup(state, expr.name)
+        elif isinstance(expr, StructLiteral):
+            for _,value in expr.fields: self.expression(value,state,record)
+        elif isinstance(expr, Field):
+            self.expression(expr.base,state,record)
+            fact=TOP if expr.typ=='int' else None
         elif isinstance(expr, ArrayLiteral):
             values = [self.expression(e, state, record) for e in expr.elements]
             fact = ArrayFact((min(v[0] for v in values), max(v[1] for v in values)) if values else TOP)
@@ -81,7 +86,7 @@ class RangeAnalysis:
             fact = base.elements if isinstance(base, ArrayFact) else TOP
         elif isinstance(expr, Call):
             for arg in expr.args: self.expression(arg, state, record)
-            fact = TOP if expr.typ == 'int' else None
+            fact = ArrayFact() if isinstance(expr.typ,ArrayType) else (TOP if expr.typ == 'int' else None)
         elif isinstance(expr, Unary):
             value = self.expression(expr.operand, state, record)
             if bottom(value): fact = BOTTOM
@@ -121,6 +126,9 @@ class RangeAnalysis:
                 state[-1][stmt.name] = self.expression(stmt.value, state, record)
             elif isinstance(stmt, Assign):
                 self.store(state, stmt.name, self.expression(stmt.value, state, record))
+            elif isinstance(stmt, FieldAssign):
+                self.expression(stmt.target,state,record)
+                self.expression(stmt.value,state,record)
             elif isinstance(stmt, IndexAssign):
                 self.expression(stmt.target, state, record)
                 value = self.expression(stmt.value, state, record)
@@ -159,6 +167,6 @@ class RangeAnalysis:
 
     def analyze(self, program):
         for fn in program.functions:
-            args = {arg.name: TOP if arg.typ == 'int' else None for arg in fn.args}
+            args = {arg.name: ArrayFact() if isinstance(arg.typ,ArrayType) else (TOP if arg.typ == 'int' else None) for arg in fn.args}
             self.block(fn.body, [args], True)
         return self.facts

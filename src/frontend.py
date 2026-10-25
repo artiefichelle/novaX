@@ -66,10 +66,10 @@ TOKEN = re.compile(
     r'(?P<WS>\s+)|(?P<COMMENT>//[^\n]*|/\*[\s\S]*?\*/)|'
     r'(?P<STRING>"(?:[^"\\\n]|\\.)*")|(?P<NUM>[0-9]+)|'
     r'(?P<ID>[A-Za-z_][A-Za-z_0-9]*)|'
-    r'(?P<OP>\+=|-=|\*=|/=|%=|->|==|!=|<=|>=|&&|\|\||[@+*/%(){}\[\];,:=<>!-])|(?P<BAD>.)'
+    r'(?P<OP>\+=|-=|\*=|/=|%=|->|==|!=|<=|>=|&&|\|\||[@+*/%(){}\[\];,.:=<>!-])|(?P<BAD>.)'
 )
 KEYWORDS = {'fn', 'let', 'var', 'return', 'if', 'else', 'while', 'break',
-            'continue', 'true', 'false', 'int', 'str', 'bool'}
+            'continue', 'true', 'false', 'int', 'str', 'bool', 'struct', 'new'}
 TYPES = {'int', 'str', 'bool'}
 BUILTINS = {'print', 'printf', 'len', 'to_bool', 'to_int'}
 
@@ -109,6 +109,14 @@ class ArrayType:
         return f'int[{self.size}]'
 
 
+@dataclass(frozen=True)
+class StructType:
+    name: str
+
+    def __str__(self):
+        return self.name
+
+
 @dataclass
 class Node:
     span: Span
@@ -116,7 +124,7 @@ class Node:
 
 @dataclass
 class Expr(Node):
-    typ: str | ArrayType | None = field(init=False, default=None)
+    typ: str | ArrayType | StructType | None = field(init=False, default=None)
 
 
 @dataclass
@@ -166,11 +174,35 @@ class IndexAssign(Node):
 
 
 @dataclass
+class StructLiteral(Expr):
+    name: str
+    fields: list[tuple[str, Expr]]
+
+
+@dataclass
+class Field(Expr):
+    base: Expr
+    name: str
+
+
+@dataclass
+class FieldAssign(Node):
+    target: Field
+    value: Expr
+
+
+@dataclass
+class StructDef(Node):
+    name: str
+    fields: list[Parameter]
+
+
+@dataclass
 class Decl(Node):
     mutable: bool
     name: str
     value: Expr
-    annotation: str | ArrayType | None
+    annotation: str | ArrayType | StructType | None
 
 
 @dataclass
@@ -215,20 +247,21 @@ class Transfer(Node):
 @dataclass
 class Parameter(Node):
     name: str
-    typ: str | ArrayType
+    typ: str | ArrayType | StructType
 
 
 @dataclass
 class Function(Node):
     name: str
     args: list[Parameter]
-    returns: str | ArrayType
+    returns: str | ArrayType | StructType
     body: list[Node]
 
 
 @dataclass
 class Program(Node):
     functions: list[Function]
+    structs: list[StructDef] = field(default_factory=list)
 
 
 class Parser:
@@ -264,7 +297,8 @@ class Parser:
     def type_name(self):
         token = self.eat()
         if token.value not in TYPES:
-            raise CompileError('Expected type int, str or bool', token.span)
+            if token.kind == 'ID' and token.value not in KEYWORDS: return StructType(token.value)
+            raise CompileError('Expected type int, str, bool, array or struct name', token.span)
         if self.peek().value == '[':
             self.eat('[')
             size = self.eat()
@@ -280,12 +314,29 @@ class Parser:
     def parse(self):
         start = self.peek().span
         functions = []
+        structs = []
         try:
             while self.peek().kind != 'EOF':
-                functions.append(self.function())
+                if self.peek().value == 'struct': structs.append(self.struct_definition())
+                else: functions.append(self.function())
         except RecursionError:
             raise CompileError('Program exceeds nesting limit', self.peek().span) from None
-        return Program(self.span(start), functions)
+        return Program(self.span(start), functions, structs)
+
+    def struct_definition(self):
+        start = self.eat('struct').span
+        name = self.ident().value
+        self.eat('{')
+        fields = []
+        while self.peek().value != '}':
+            token = self.ident()
+            self.eat(':')
+            typ = self.type_name()
+            fields.append(Parameter(self.span(token.span), token.value, typ))
+            if self.peek().value != ',': break
+            self.eat(',')
+        self.eat('}')
+        return StructDef(self.span(start), name, fields)
 
     def function(self):
         start = self.peek().span
@@ -378,6 +429,9 @@ class Parser:
                 if op != '=':
                     value = Binary(self.span(start), op[0], target, value)
                 return Assign(self.span(start), target.name, value)
+            if isinstance(target, Field):
+                if op != '=': raise CompileError('Struct fields currently support plain assignment only', target.span)
+                return FieldAssign(self.span(start), target, value)
             if isinstance(target, Index):
                 if op != '=':
                     raise CompileError('Array elements currently support plain assignment only', target.span)
@@ -402,6 +456,19 @@ class Parser:
             self.eat()
             left = self.expression()
             self.eat(')')
+        elif token.value == 'new':
+            self.eat()
+            name = self.ident().value
+            self.eat('{')
+            fields = []
+            while self.peek().value != '}':
+                field_name = self.ident().value
+                self.eat(':')
+                fields.append((field_name, self.expression()))
+                if self.peek().value != ',': break
+                self.eat(',')
+            self.eat('}')
+            left = StructLiteral(self.span(start), name, fields)
         elif token.value == '[':
             self.eat()
             elements = []
@@ -451,11 +518,16 @@ class Parser:
                 left = Call(self.span(start), name.value, args)
             else:
                 left = Name(name.span, name.value)
-        while self.peek().value == '[':
-            self.eat('[')
-            index = self.expression()
-            self.eat(']')
-            left = Index(Span(start.source, left.span.start, self.tokens[self.index - 1].span.end), left, index)
+        while self.peek().value in ('[', '.'):
+            if self.peek().value == '.':
+                self.eat('.')
+                name = self.ident().value
+                left = Field(self.span(left.span), left, name)
+            else:
+                self.eat('[')
+                index = self.expression()
+                self.eat(']')
+                left = Index(Span(start.source, left.span.start, self.tokens[self.index - 1].span.end), left, index)
         while self.precedence.get(self.peek().value, -1) >= minimum:
             op = self.eat().value
             right = self.expression(self.precedence[op] + 1)
@@ -466,7 +538,7 @@ class Parser:
 
 @dataclass(frozen=True)
 class Symbol:
-    typ: str | ArrayType
+    typ: str | ArrayType | StructType
     mutable: bool
 
 
@@ -474,9 +546,20 @@ class Analyzer:
     """Resolve names, annotate expression types and validate control flow."""
     def analyze(self, program):
         self.functions = {}
+        self.structs = {}
+        for definition in program.structs:
+            if definition.name in self.structs:
+                raise CompileError('Duplicate struct: ' + definition.name, definition.span)
+            fields = {}
+            for member in definition.fields:
+                if member.name in fields: raise CompileError('Duplicate field: ' + member.name, member.span)
+                if member.typ not in TYPES:
+                    raise CompileError('Struct fields currently require int, bool or str', member.span)
+                fields[member.name] = member.typ
+            self.structs[definition.name] = fields
         for fn in program.functions:
-            if isinstance(fn.returns, ArrayType) or any(isinstance(arg.typ, ArrayType) for arg in fn.args):
-                raise CompileError('Array parameters and returns are not supported; arrays must be local', fn.span)
+            self.validate_type(fn.returns, fn.span)
+            for arg in fn.args: self.validate_type(arg.typ, arg.span)
             if fn.name in self.functions:
                 raise CompileError('Duplicate function name: ' + fn.name, fn.span)
             if fn.name in BUILTINS:
@@ -504,6 +587,10 @@ class Analyzer:
             raise CompileError('Program exceeds analysis nesting limit', program.span) from None
         return program
 
+    def validate_type(self, typ, span):
+        if isinstance(typ, StructType) and typ.name not in self.structs:
+            raise CompileError('Unknown struct type: ' + typ.name, span)
+
     def lookup(self, name, span):
         for scope in reversed(self.scopes):
             if name in scope:
@@ -525,6 +612,24 @@ class Analyzer:
                 expr.typ = 'int'
             else:
                 expr.typ = 'str'
+        elif isinstance(expr, StructLiteral):
+            fields = self.structs.get(expr.name)
+            if fields is None: raise CompileError('Unknown struct type: ' + expr.name, expr.span)
+            seen = set()
+            for name, value in expr.fields:
+                if name in seen: raise CompileError('Duplicate initializer field: ' + name, value.span)
+                if name not in fields: raise CompileError('Unknown field: ' + name, value.span)
+                seen.add(name)
+                self.expect(value, fields[name], 'Field ' + name)
+            missing = set(fields) - seen
+            if missing: raise CompileError('Missing fields: ' + ', '.join(sorted(missing)), expr.span)
+            expr.typ = StructType(expr.name)
+        elif isinstance(expr, Field):
+            base = self.expression(expr.base)
+            if not isinstance(base, StructType): raise CompileError('Field access requires a struct', expr.base.span)
+            fields = self.structs[base.name]
+            if expr.name not in fields: raise CompileError('Unknown field: ' + expr.name, expr.span)
+            expr.typ = fields[expr.name]
         elif isinstance(expr, ArrayLiteral):
             for element in expr.elements:
                 self.expect(element, 'int', 'Array element')
@@ -572,8 +677,8 @@ class Analyzer:
                 self.expect(expr.right, 'bool', 'Operator ' + expr.op)
                 expr.typ = 'bool'
             elif expr.op in ('==', '!=', '<', '>', '<=', '>='):
-                if isinstance(left, ArrayType):
-                    raise CompileError('Arrays cannot be compared directly', expr.left.span)
+                if isinstance(left, (ArrayType, StructType)):
+                    raise CompileError('Aggregates cannot be compared directly', expr.left.span)
                 if expr.op not in ('==', '!=') and left == 'bool':
                     raise CompileError('Ordering requires int or str, got bool', expr.left.span)
                 self.expect(expr.right, left, 'Operator ' + expr.op)
@@ -594,6 +699,7 @@ class Analyzer:
             if terminated:
                 raise CompileError('Unreachable statement after control transfer', stmt.span)
             if isinstance(stmt, Decl):
+                if stmt.annotation: self.validate_type(stmt.annotation, stmt.span)
                 if stmt.name in self.scopes[-1]:
                     raise CompileError('Duplicate local: ' + stmt.name, stmt.span)
                 typ = self.expression(stmt.value)
@@ -605,6 +711,14 @@ class Analyzer:
                 if not symbol.mutable:
                     raise CompileError('Cannot assign to immutable value: ' + stmt.name, stmt.span)
                 self.expect(stmt.value, symbol.typ, 'Assignment ' + stmt.name)
+            elif isinstance(stmt, FieldAssign):
+                self.expression(stmt.target)
+                if not isinstance(stmt.target.base, Name):
+                    raise CompileError('Field assignment requires a named local struct', stmt.target.span)
+                symbol = self.lookup(stmt.target.base.name, stmt.target.span)
+                if not symbol.mutable:
+                    raise CompileError('Cannot assign to immutable struct: ' + stmt.target.base.name, stmt.target.span)
+                self.expect(stmt.value, stmt.target.typ, 'Field assignment')
             elif isinstance(stmt, IndexAssign):
                 self.expression(stmt.target)
                 symbol = self.lookup(stmt.target.base.name, stmt.target.span)
@@ -616,8 +730,8 @@ class Analyzer:
                 terminated = True
             elif isinstance(stmt, (Print, ExprStmt)):
                 typ = self.expression(stmt.value)
-                if isinstance(stmt, Print) and isinstance(typ, ArrayType):
-                    raise CompileError('print does not support arrays; print individual elements', stmt.value.span)
+                if isinstance(stmt, Print) and isinstance(typ, (ArrayType, StructType)):
+                    raise CompileError('print does not support aggregates; print individual elements or fields', stmt.value.span)
             elif isinstance(stmt, Transfer):
                 if not self.loops:
                     raise CompileError(stmt.kind + ' is only allowed inside a loop', stmt.span)
@@ -662,6 +776,10 @@ def optimize_program(program):
                     folded.typ = 'int'
                     report['constant_folds'] += 1
                     return folded
+        elif isinstance(expr, StructLiteral):
+            expr.fields = [(name, expression(value)) for name, value in expr.fields]
+        elif isinstance(expr, Field):
+            expr.base = expression(expr.base)
         elif isinstance(expr, ArrayLiteral):
             expr.elements = [expression(element) for element in expr.elements]
         elif isinstance(expr, Index):
@@ -676,7 +794,7 @@ def optimize_program(program):
         for stmt in statements:
             if isinstance(stmt, (Decl, Assign, Return, Print, ExprStmt)):
                 stmt.value = expression(stmt.value)
-            elif isinstance(stmt, IndexAssign):
+            elif isinstance(stmt, (IndexAssign, FieldAssign)):
                 stmt.target = expression(stmt.target)
                 stmt.value = expression(stmt.value)
             elif isinstance(stmt, If):

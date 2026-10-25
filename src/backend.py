@@ -1,6 +1,6 @@
 """LLVM lowering for an already analyzed NOVA-X Program."""
 from llvmlite import ir, binding
-from frontend import (CompileError, Literal, Name, Call, Unary, Binary, ArrayLiteral, Index, IndexAssign, ArrayType,
+from frontend import (CompileError, Literal, Name, Call, Unary, Binary, ArrayLiteral, Index, IndexAssign, ArrayType, StructType, StructLiteral, Field, FieldAssign,
                       Decl, Assign, Return, Print, ExprStmt, If, While, Transfer)
 
 I32=ir.IntType(32)
@@ -10,9 +10,15 @@ TYPES={'int':I32,'str':STR,'bool':BOOL}
 class Compiler:
     def __init__(self, funcs, ranges=None):
         self.ranges=ranges or {}; self.modulo_reductions=0
-        self.module=ir.Module(name='nova_x'); self.module.triple=binding.get_default_triple(); self.funcs={}
+        self.module=ir.Module(name='nova_x',context=ir.Context()); self.module.triple=binding.get_default_triple(); self.funcs={}
+        self.struct_defs={definition.name:definition for definition in funcs.structs}
+        self.struct_types={}
+        for definition in funcs.structs:
+            typ=self.module.context.get_identified_type('nx_struct_'+definition.name)
+            typ.set_body(*[TYPES[field.typ] for field in definition.fields])
+            self.struct_types[definition.name]=typ
         for fn in funcs.functions:
-            self.funcs[fn.name]=ir.Function(self.module,ir.FunctionType(TYPES[fn.returns],[TYPES[arg.typ] for arg in fn.args]),name=fn.name if fn.name=='main' else 'nx_user_'+fn.name)
+            self.funcs[fn.name]=ir.Function(self.module,ir.FunctionType(self.llvm_type(fn.returns),[self.llvm_type(arg.typ) for arg in fn.args]),name=fn.name if fn.name=='main' else 'nx_user_'+fn.name)
         self.printf=ir.Function(self.module,ir.FunctionType(I32,[ir.IntType(8).as_pointer()],var_arg=True),name='printf')
         self.fail=ir.Function(self.module,ir.FunctionType(ir.VoidType(),[STR]),name='nx_rt_fail')
         self.fail.attributes.add('noreturn')
@@ -23,6 +29,12 @@ class Compiler:
             typ=ir.FunctionType(ir.LiteralStructType([I32,ir.IntType(1)]),[I32,I32])
             self.checked[op]=ir.Function(self.module,typ,name=f'llvm.s{op}.with.overflow.i32')
         for fn in funcs.functions: self.generate(fn.name,fn.args,fn.body)
+    def llvm_type(self,typ):
+        if isinstance(typ,ArrayType): return ir.ArrayType(I32,typ.size)
+        if isinstance(typ,StructType): return self.struct_types[typ.name]
+        return TYPES[typ]
+    def field_index(self,base,name):
+        return [field.name for field in self.struct_defs[base.typ.name].fields].index(name)
     def generate(self,name,args,body):
         fun=self.funcs[name]; allocations=fun.append_basic_block('allocations'); entry=fun.append_basic_block('entry'); self.allocations=ir.IRBuilder(allocations); self.builder=ir.IRBuilder(entry); self.scopes=[{}]; self.loops=[]
         for parameter,arg in zip(args,fun.args):
@@ -75,6 +87,12 @@ class Compiler:
         b=self.builder
         if isinstance(e,Literal):
             return self.string_constant(e.value) if e.typ=='str' else ir.Constant(TYPES[e.typ],e.value)
+        if isinstance(e,StructLiteral):
+            result=ir.Constant(self.llvm_type(e.typ),None)
+            positions={field.name:index for index,field in enumerate(self.struct_defs[e.name].fields)}
+            for name,value in e.fields: result=b.insert_value(result,self.value(value),positions[name])
+            return result
+        if isinstance(e,Field): return b.extract_value(self.value(e.base),self.field_index(e.base,e.name))
         if isinstance(e,ArrayLiteral):
             result=ir.Constant(ir.ArrayType(I32,len(e.elements)),None)
             for index,element in enumerate(e.elements): result=b.insert_value(result,self.value(element),index)
@@ -133,6 +151,10 @@ class Compiler:
             elif isinstance(s,Assign):
                 slot,_=self.lookup(s.name)
                 b.store(self.value(s.value),slot)
+            elif isinstance(s,FieldAssign):
+                slot,_=self.lookup(s.target.base.name)
+                pointer=b.gep(slot,[ir.Constant(I32,0),ir.Constant(I32,self.field_index(s.target.base,s.target.name))])
+                b.store(self.value(s.value),pointer)
             elif isinstance(s,IndexAssign):
                 pointer=self.index_pointer(s.target)
                 b.store(self.value(s.value),pointer)
