@@ -21,7 +21,7 @@ class OwnershipTests(unittest.TestCase):
             ('let a=box(1); let b=a; print(read_box(a));','Use after move'),
             ('let a=box(1); write_box(a,2);','mutable'),
             ('let a=box(1); if true { let b=a; } print(read_box(a));','Use after move'),
-            ('let a=box(1); while false { let b=a; }','outer owner'),
+            ('let a=box(1); while false { let b=a; }','reinitializing owner'),
             ('let a=box(1); print(a);','print'),
             ('let a=box(1); let b=box(1); print(a==b);','compared'),
             ('read_box(box(1));','named owner'),
@@ -54,6 +54,9 @@ fn early(n:int)->int {let a=box(n); if n==1 {return read_box(a);} return 0;}
 fn main()->int { var a=box(1); a=box(2); let b=relay(a); box(3); early(1); early(0);
 var i=0; while i<5 {let local=box(i); i=i+1; if i==2 {continue;} if i==4 {break;} let another=box(i);}
 if true {let nested=box(5);} print(read_box(b)); return 0;}'''
+        self.assert_reclaimed(source,'2\n')
+
+    def assert_reclaimed(self, source, expected):
         p,ir,_=self.compile_source(source)
         self.assertEqual(p.returncode,0,p.stderr)
         runtime=(ROOT/'src/runtime.c').read_text()
@@ -67,7 +70,7 @@ if true {let nested=box(5);} print(read_box(b)); return 0;}'''
                 self.assertEqual(build.returncode,0,build.stderr)
                 run=subprocess.run([str(folder/'run')],capture_output=True,text=True)
                 self.assertEqual(run.returncode,0,run.stderr)
-                self.assertEqual(run.stdout,'2\n')
+                self.assertEqual(run.stdout,expected)
                 self.assertEqual(run.stderr,'live=0\n')
 
     def test_loop_reinitialization_is_not_definite(self):
