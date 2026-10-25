@@ -1,4 +1,4 @@
-# NOVA-X 0.8 compiler architecture and policy
+# NOVA-X 0.9 compiler architecture and policy
 
 ## Pipeline
 
@@ -9,7 +9,7 @@
    LLVM and does not resolve types.
 4. `frontend.Analyzer().analyze(program)` resolves function/variable names,
    validates types, mutability, calls and control flow, and annotates every
-   expression with `int`, `bool`, `str`, or a fixed-size local `ArrayType`. Invalid programs stop here.
+   expression with `int`, `bool`, `str`, or an aggregate `ArrayType` / `StructType`. Invalid programs stop here.
 5. `frontend.optimize_program(program)` folds valid, non-overflowing integer
    arithmetic and retains the original expression span and inferred type.
 6. At `-O2` / `-O3`, `ranges.RangeAnalysis` computes conservative intervals.
@@ -44,7 +44,9 @@ This is an internal ABI and is not a supported external-function interface.
 
 Strings live for the process lifetime. Locals use stack slots allocated once
 per function invocation. Local `int[N]` arrays use `[N x i32]` stack storage and copy by value.
-They cannot be passed or returned, so they expose no escaping references.
+They may be passed and returned by value, without exposed references.
+Structs lower to module-local named LLVM aggregate types with primitive fields;
+they also use value semantics. This calling convention is internal and unstable.
 Recursive calls consume additional stack. Heap objects,
 mutable references, pointers exposed to source code, ownership, borrowing, and
 FFI remain unimplemented. No Rust-equivalent memory-safety claim is made.

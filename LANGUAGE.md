@@ -1,4 +1,4 @@
-# Implemented language — NOVA-X 0.8
+# Implemented language — NOVA-X 0.9
 
 This document specifies implemented behavior, not planned features.
 
@@ -25,7 +25,7 @@ after the loop. Statements after an unconditional transfer are rejected.
 
 - `int`: signed i32, from -2147483648 through 2147483647.
 - `bool`: a distinct truth value, `true` or `false`.
-- `int[N]`: a local fixed-size array of N integers; N is 0 through 4096.
+- `int[N]`: a fixed-size array value of N integers; N is 0 through 4096.
 - `str`: a reference to immutable, NUL-terminated UTF-8 static storage.
 - `let name = expression;` creates an immutable binding.
 - `var name: int = expression;` creates a mutable binding with a checked annotation.
@@ -63,7 +63,8 @@ implicit wrapping. Division truncates toward zero. Remainder has the dividend's
 sign. Zero divisors and the pair `-2147483648`, `-1` for either `/` or `%` cause
 runtime errors, including inside optimized builds.
 
-Comparisons accept two operands of the same type and return `bool`. Integer
+Primitive comparisons accept two operands of the same type and return `bool`.
+Arrays and structs cannot be compared directly. Integer
 comparisons are signed; string comparisons compare UTF-8 byte sequences by
 content (not pointer identity), without locale or normalization. Boolean values
 support equality and inequality only; their ordering is not defined. Unary `!`
@@ -129,16 +130,16 @@ writes and whole-array reassignment. Arrays must be initialized at declaration.
 Each local slot is allocated once per function invocation, including inside loops;
 a declaration's initializer still runs on each execution of that declaration.
 
-Only named local arrays can be indexed, with an `int` index. Reads and writes
+Only named array bindings or parameters can be indexed, with an `int` index. Reads and writes
 require `0 <= index < len(array)`. An invalid index terminates with exit code 1
 and `nova runtime error: array index out of bounds` on stderr. The check remains
 active at every optimization level. Empty arrays have no valid index.
 
 For `a[index] = value`, the index is evaluated once and checked before the RHS
 is evaluated. Array literals evaluate elements left-to-right. Array values may
-be copied or assigned to same-size locals, but cannot escape through function
-parameters, return values, pointers, references, or closures. Those interfaces
-are not implemented. Indexing temporary literals, multidimensional arrays,
+be copied, assigned to same-size locals, passed to matching typed parameters,
+and returned from functions. Parameters are immutable value copies; local `var`
+copies may be modified. No array references, pointers or closures are exposed. Indexing temporary literals, multidimensional arrays,
 non-int arrays, slices, dynamic allocation, resizing, comparison, printing entire
 arrays, and element compound assignment are also not implemented.
 
@@ -154,3 +155,37 @@ subtraction when successful evaluation proves `0 <= dividend < 2*divisor`.
 Intermediate operand evaluation, arithmetic failures and array bounds remain
 observable. Unsupported range/control-flow patterns fall back to existing code.
 `--no-range-opt` disables the pass; `--opt-report` reports its reduction count.
+
+## Structs and aggregate function values (0.9)
+
+```text
+struct Point { x: int, y: int }
+fn shift(p: Point) -> Point {
+    var result = p;
+    result.x = result.x + 1;
+    return result;
+}
+```
+
+Structs are declared at file scope and may be used by functions appearing before
+the declaration. A struct name identifies a nominal type: different names are
+different types even if their fields match. Type and function names occupy
+separate namespaces. Fields must have primitive type `int`, `bool`, or `str`.
+Nested, recursive and array-valued struct fields are not supported.
+
+Construct a struct using `new Point {x: 1, y: 2}`. Every field must appear exactly
+once, in any order. Expressions evaluate in the order written in the initializer.
+Read fields with `p.x`, including a function-return value such as `shift(p).x`.
+A plain field assignment `p.x = value;` requires a named mutable `var` binding;
+field compound assignment and writes to temporary results are not implemented.
+
+Functions accept and return struct or fixed-size integer array values. A parameter
+is immutable, including its fields/elements. `var copy = parameter;` creates an
+independent editable copy. Returning an aggregate copies its value, so no pointer
+to a callee's local stack escapes. Array indexing still requires a named binding;
+write `let a = make_array(); print(a[0]);` rather than indexing the call directly.
+
+Aggregate storage and calling conventions are internal LLVM/Clang implementation
+details. No stable FFI or Rust-style ownership/borrowing guarantee is introduced.
+Empty structs and zero-length integer arrays are supported. Many large aggregate
+copies or deep recursion can still exhaust the host stack.
