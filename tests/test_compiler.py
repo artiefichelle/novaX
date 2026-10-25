@@ -190,7 +190,7 @@ class SystemsFoundationTests(unittest.TestCase):
     def test_cli_check_and_version(self):
         version=subprocess.run([sys.executable,str(COMPILER),'--version'],capture_output=True,text=True,timeout=20)
         self.assertEqual(version.returncode,0,version.stderr)
-        self.assertIn('0.9.0',version.stdout)
+        self.assertIn('0.10.0',version.stdout)
         with tempfile.TemporaryDirectory() as d:
             source=Path(d)/'input.nx'; source.write_text('fn main() -> int {return 0;}')
             output=Path(d)/'absent'
@@ -484,6 +484,52 @@ class AggregateFunctionTests(unittest.TestCase):
     def test_empty_aggregates_and_forward_type(self):
         self.native('fn echo(e:Empty,a:int[0]) -> Empty {return e;} '
                     'struct Empty {} fn main() -> int {let e=echo(new Empty {},[]);print(len([]));return 0;}', '0\n')
+
+class NestedStructTests(unittest.TestCase):
+    compile_source=CompilerTests.compile_source
+    native=LanguageV02Tests.native
+
+    def test_nested_copy_write_and_return(self):
+        self.native('struct Point {x:int,y:int} struct Box {start:Point,end:Point} '
+                    'fn moved(b:Box) -> Box {var copy=b;copy.start.x=copy.start.x+5;return copy;}'
+                    'fn main() -> int {let p=new Point {x:1,y:2};let b=new Box {start:p,end:p};'
+                    'var c=moved(b);c.end=new Point {x:9,y:8};print(b.start.x);print(c.start.x);'
+                    'print(c.end.y);print(moved(b).start.x);return 0;}', '1\n6\n8\n6\n')
+
+    def test_forward_nested_definition(self):
+        self.native('struct Outer {inner:Inner} struct Inner {flag:bool,text:str}'
+                    'fn main() -> int {var o=new Outer {inner:new Inner {flag:true,text:"hi"}};'
+                    'o.inner.flag=false;o.inner.text="new";print(o.inner.flag);print(o.inner.text);return 0;}',
+                    'false\nnew\n')
+
+    def test_recursive_types_rejected(self):
+        for declarations in ('struct A {self:A}', 'struct A {b:B}struct B {a:A}'):
+            p,_,_=self.compile_source(declarations+'fn main() -> int {return 0;}')
+            self.assertNotEqual(p.returncode,0)
+            self.assertIn('Recursive by-value',p.stderr)
+            self.assertNotIn('Traceback',p.stderr)
+
+    def test_nested_errors(self):
+        prefix='struct P {x:int}struct Box {p:P}'
+        for body in ('let b=new Box {p:new P {x:1}};b.p.x=2;',
+                     'var b=new Box {p:new P {x:1}};b.p=false;',
+                     'let b=new Box {p:1};','let b=new Box {p:new P {x:1}};print(b.p.missing);'):
+            p,_,_=self.compile_source(prefix+'fn main() -> int {'+body+'return 0;}')
+            self.assertNotEqual(p.returncode,0)
+            self.assertIn('test.nx:1:',p.stderr)
+            self.assertNotIn('Traceback',p.stderr)
+
+    def test_struct_storage_limit(self):
+        declarations='struct S0 {x:int}'
+        for i in range(1,15): declarations+='struct S'+str(i)+' {a:S'+str(i-1)+',b:S'+str(i-1)+'}'
+        p,_,_=self.compile_source(declarations+'fn main() -> int {return 0;}')
+        self.assertNotEqual(p.returncode,0)
+        self.assertIn('64 KiB',p.stderr)
+        declarations='struct D0 {}'
+        for i in range(1,67): declarations+='struct D'+str(i)+' {child:D'+str(i-1)+'}'
+        p,_,_=self.compile_source(declarations+'fn main() -> int {return 0;}')
+        self.assertNotEqual(p.returncode,0)
+        self.assertIn('64 levels',p.stderr)
 
 if __name__=='__main__':unittest.main()
 
