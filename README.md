@@ -1,86 +1,88 @@
-# NOVA-X Compiler Prototype 0.3
+# NOVA-X 0.4 — experimental systems-language compiler
 
-NOVA-X is an experimental compiler for a small C++/Rust-inspired language.
-It translates source to LLVM IR and uses Clang to build native executables.
-Version 0.3 adds typed UTF-8 strings. It does not implement Rust ownership,
-borrowing, arrays, classes, GPU execution, or an AI optimizer.
+NOVA-X compiles a small typed language to LLVM IR and native executables via
+Clang. The goal is a systems language; version 0.4 is a tested foundation,
+not a complete replacement for C++ or Rust. See `ROADMAP.md` for unfinished work
+and `LANGUAGE.md` for the implemented language rules.
 
-## Install and run
+## Quick start
 
-Download `nova-x-compiler-v0.3.zip`, extract it, and open the `nova-x` directory.
-Requirements: Python 3.10+ and Clang on PATH.
+Clone this repository, or extract `nova-x-compiler-v0.4.zip` and enter `nova-x`.
+Requirements: Python 3.10+, the dependency in `requirements.txt`, and Clang with
+a C11-capable system toolchain. Native validation was performed on macOS ARM64;
+other targets have not yet been validated.
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 python -m pip install -r requirements.txt
-python src/novax.py examples/strings.nx -o strings
-./strings
-python src/novax.py examples/fibonacci.nx -O3 -o fib
-./fib
-python src/novax.py examples/hello.nx --emit-llvm -o hello.ll
+python src/novax.py --version
+python src/novax.py examples/systems.nx --check
+python src/novax.py examples/systems.nx -o systems
+./systems
 python -m unittest discover -s tests -v
 ```
 
-## Strings and types — new in 0.3
+`src/runtime.c` must stay beside `src/novax.py`. Native builds compile both the
+LLVM module and this runtime. `--emit-llvm -o program.ll` writes verified IR;
+link that IR with `src/runtime.c` to build an executable manually.
+
+## Example
 
 ```text
-fn choose(flag: int, name: str) -> str {
+fn select(flag: int, name: str) -> str {
     if flag { return name; }
     return "NOVA-X";
 }
 
 fn main() -> int {
-    let greeting: str = "Hallo Welt 🌍";
-    var message = choose(true, greeting);
+    var count = 0;
+    while count < 3 {
+        count += 1;
+        print(count);
+    }
+    let message: str = select(true, "Hallo Welt 🌍");
     print(message);
-    message = "Text mit\nZeilenumbruch";
-    print(message);
+    print(len(message));
+    print(message != "");
     return 0;
 }
 ```
 
-- `int`: signed 32-bit integer; `str`: immutable UTF-8 text.
-- `let` and `var` infer their type or accept an explicit `: int` / `: str`.
-- `var` allows reassignment of the same type; `let` is immutable.
-- Function parameters and return values explicitly declare `int` or `str`.
-- `print(value);` prints an integer or string and appends a newline.
-- String literals use double quotes and JSON-style escapes, including `\n`,
-  `\t`, `\"`, `\\`, and `\uXXXX`. Unicode text and emoji are supported.
-- Type mismatches in declarations, assignments, calls, returns, conditions,
-  and operators produce compiler errors. `main` must return `int` and take no arguments.
-- Strings live in static storage for the program's lifetime. A string variable
-  may refer to a different literal, but individual characters cannot be modified.
+## New in 0.4
 
-String concatenation, comparison, indexing, length, interpolation, input, and
-embedded NUL characters are not supported. Operators and conditions require
-integers; strings are not implicitly converted to numbers or truth values.
+- Checked signed i32 addition, subtraction, multiplication, and unary negation.
+  Overflow ends the program with exit code 1 and a message on stderr.
+- Checked division and remainder: zero divisors and `INT_MIN / -1` (including
+  the corresponding remainder) produce a runtime error.
+- String content comparisons `== != < <= > >=` and `len(str)` in UTF-8 bytes.
+- Compound assignments `+= -= *= /= %=` for mutable integers.
+- Local stack slots allocated once per function invocation, outside loops.
+- User function symbols isolated from C runtime symbols.
+- `--version`, `--check`, and LLVM verification before writing output.
+- Temporary build files no longer overwrite unrelated `.ll` files. A failed
+  backend compilation preserves existing output; output cannot equal source.
 
-## Existing language features
+## Existing features
 
-- Functions, recursion, lexical block scopes, and function calls as statements.
-- Arithmetic `+ - * / %`, comparisons `== != < <= > >=`, unary `-` and `!`.
-- `if` / `else if` / `else`, `while`, `break`, `continue`, and `return`.
-- Short-circuit `&&` / `||` with integer results 0 or 1.
-- `true` / `false` are integer literals 1 / 0, not a separate Boolean type.
-- Line comments `// ...` and non-nested block comments `/* ... */`.
-- Full signed i32 literal range, including `-2147483648`.
-- Deterministic constant folding, Clang `-O0` through `-O3`, and `--opt-report`.
-- `@optimize(speed)` is accepted as an annotation, with no speed guarantee.
+`int` and `str`, inferred or explicit variable types, immutable `let`, mutable
+`var`, typed functions and returns, recursion, `print`, lexical scopes,
+`if` / `else if` / `else`, `while`, `break`, `continue`, short-circuit logic,
+UTF-8 text and JSON-style escapes, line and non-nested block comments.
+`true` and `false` are integer values 1 and 0. No separate Boolean type exists.
 
-## Validation
+## Validation and limits
 
-The suite contains 20 tests including existing integer-language regressions,
-string function calls and returns, reassignment, UTF-8 and escape sequences,
-format-string payloads printed as data, malformed literals, and type errors.
-Native feature tests execute at both `-O0` and `-O3`.
+Tests cover arithmetic boundaries and runtime failures at `-O0` and `-O3`,
+short-circuit behavior, type errors, text, nested loops, symbol isolation,
+stack-slot placement, and CLI file preservation. Run the suite locally.
 
-## Prototype limitations
+Strings refer to immutable static data; no heap allocation or ownership model
+exists yet. Arrays, structs, pointers, references, modules, file I/O, a package
+manager, debugger integration, and a formal memory-safety model remain future
+work. Text concatenation and input are not implemented. This compiler is
+experimental and should only compile trusted programs.
 
-Arithmetic overflow, division by zero, and certain control-flow corner cases
-are not yet given fully safe, defined semantics. Loop-local stack allocations
-are not hoisted; very long loops with local declarations may exhaust the stack.
-Compile and run trusted programs only. This is not a production-safe compiler.
-
-The proposed AI extension protocol is in `AI_PLUGIN_SPEC.md`; the compiler
-makes no network calls and runs no AI model. No speed advantage over C++ or
-Rust is claimed. Performance claims require equivalent programs, verified
-outputs, and recorded hardware, compiler versions, runtime, and memory usage.
+`@optimize(speed)` and `--opt-report` expose deterministic optimization only.
+The compiler makes no AI/network calls and claims no speed advantage over
+C++ or Rust. `AI_PLUGIN_SPEC.md` is a proposed extension, not a working feature.
