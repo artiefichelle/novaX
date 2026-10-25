@@ -1,60 +1,86 @@
-# NOVA-X Compiler Prototype 0.2
+# NOVA-X Compiler Prototype 0.3
 
-An **experimental** C++/Rust-inspired programming-language compiler, producing native executables through LLVM IR and Clang. This is **not a production-safe compiler**, and the language does **not yet** implement Rust-style ownership, borrowing, memory-safe references, strings, classes, GPU execution, or a real AI optimizer. No speedup over C++ or Rust is claimed.
+NOVA-X is an experimental compiler for a small C++/Rust-inspired language.
+It translates source to LLVM IR and uses Clang to build native executables.
+Version 0.3 adds typed UTF-8 strings. It does not implement Rust ownership,
+borrowing, arrays, classes, GPU execution, or an AI optimizer.
 
-## Requirements
+## Install and run
 
-- Python 3.10+
-- `pip install -r requirements.txt`
-- `clang` on PATH (required for native executables)
-
-## Run
+Download `nova-x-compiler-v0.3.zip`, extract it, and open the `nova-x` directory.
+Requirements: Python 3.10+ and Clang on PATH.
 
 ```bash
-python src/novax.py examples/hello.nx -o hello --opt-report
-./hello
+python -m pip install -r requirements.txt
+python src/novax.py examples/strings.nx -o strings
+./strings
 python src/novax.py examples/fibonacci.nx -O3 -o fib
 ./fib
 python src/novax.py examples/hello.nx --emit-llvm -o hello.ll
 python -m unittest discover -s tests -v
 ```
 
-## Language subset
+## Strings and types — new in 0.3
 
-- `.nx` files; `fn name(arg: int) -> int { ... }`
-- `let` immutable and `var` mutable bindings with lexical block scopes
-- signed 32-bit `int` arguments, return values, integer literals
-- arithmetic and comparison expressions, `if`/`else`, `while`, recursion, `return`, and `print(int)`
-- `@optimize(speed)` accepted as an annotation (not currently a speed guarantee)
-- compile-time static checks for undeclared variables, invalid assignments to `let`, duplicate functions, wrong call arities, and missing returns
-- deterministic AST constant folding for safe nonnegative i32 intermediate arithmetic
-- LLVM IR generation and Clang `-O0` .. `-O3`
+```text
+fn choose(flag: int, name: str) -> str {
+    if flag { return name; }
+    return "NOVA-X";
+}
 
-## Limitations and security
+fn main() -> int {
+    let greeting: str = "Hallo Welt 🌍";
+    var message = choose(true, greeting);
+    print(message);
+    message = "Text mit\nZeilenumbruch";
+    print(message);
+    return 0;
+}
+```
 
-Only simple integer code is supported. Arithmetic overflow, division by zero, and some control-flow corner cases are *not* yet given fully safe, defined semantics. `&&` and `||` short-circuit and produce 0 or 1. Boolean literals are integer values (`false` = 0, `true` = 1), not a separate type. Block comments cannot be nested. Loop-local stack allocations are not yet hoisted, so very long loops with local declarations may exhaust the stack. `int` is an i32; no implicit heap allocations, borrowing, classes, or AI code execution exist. Compile/run only trusted sources in this prototype.
+- `int`: signed 32-bit integer; `str`: immutable UTF-8 text.
+- `let` and `var` infer their type or accept an explicit `: int` / `: str`.
+- `var` allows reassignment of the same type; `let` is immutable.
+- Function parameters and return values explicitly declare `int` or `str`.
+- `print(value);` prints an integer or string and appends a newline.
+- String literals use double quotes and JSON-style escapes, including `\n`,
+  `\t`, `\"`, `\\`, and `\uXXXX`. Unicode text and emoji are supported.
+- Type mismatches in declarations, assignments, calls, returns, conditions,
+  and operators produce compiler errors. `main` must return `int` and take no arguments.
+- Strings live in static storage for the program's lifetime. A string variable
+  may refer to a different literal, but individual characters cannot be modified.
 
-## AI extension design (not yet executed)
+String concatenation, comparison, indexing, length, interpolation, input, and
+embedded NUL characters are not supported. Operators and conditions require
+integers; strings are not implicitly converted to numbers or truth values.
 
-A proposed optimizer protocol is documented in `AI_PLUGIN_SPEC.md`. An AI process should suggest edits, but only a separate verifier/test pipeline may approve them. The current compiler **does not contact an AI model**.
+## Existing language features
 
-## Performance validation
+- Functions, recursion, lexical block scopes, and function calls as statements.
+- Arithmetic `+ - * / %`, comparisons `== != < <= > >=`, unary `-` and `!`.
+- `if` / `else if` / `else`, `while`, `break`, `continue`, and `return`.
+- Short-circuit `&&` / `||` with integer results 0 or 1.
+- `true` / `false` are integer literals 1 / 0, not a separate Boolean type.
+- Line comments `// ...` and non-nested block comments `/* ... */`.
+- Full signed i32 literal range, including `-2147483648`.
+- Deterministic constant folding, Clang `-O0` through `-O3`, and `--opt-report`.
+- `@optimize(speed)` is accepted as an annotation, with no speed guarantee.
 
-Benchmark against comparable optimized C++ and Rust programs on the same machine. Verify outputs and record runtime, compiler versions, memory usage, and hardware; the 10,000x target is a research aspiration for special workloads rather than a language-wide promise.
+## Validation
 
-## New in 0.2
+The suite contains 20 tests including existing integer-language regressions,
+string function calls and returns, reassignment, UTF-8 and escape sequences,
+format-string payloads printed as data, malformed literals, and type errors.
+Native feature tests execute at both `-O0` and `-O3`.
 
-- Short-circuit `&&` / `||`: skipped operands do not run function calls.
-- `else if` chains.
-- `break;` and `continue;` affect the innermost `while` loop; use outside a loop is rejected.
-- Function calls as statements, for example `greet();` (the return value is discarded).
-- `true` and `false` literals with integer semantics.
-- Multi-line `/* ... */` comments, with an error for unterminated comments.
-- Full negative i32 literal range, including `-2147483648`.
-- The C runtime name `printf` is reserved to prevent conflicting declarations.
+## Prototype limitations
 
-Try `python src/novax.py examples/control_flow.nx -o control_flow` and run
-`./control_flow`. Expected output: `1`, `3`, `4`, `42` on separate lines.
+Arithmetic overflow, division by zero, and certain control-flow corner cases
+are not yet given fully safe, defined semantics. Loop-local stack allocations
+are not hoisted; very long loops with local declarations may exhaust the stack.
+Compile and run trusted programs only. This is not a production-safe compiler.
 
-The project remains an experimental integer-only compiler. Strings, arrays,
-separate Boolean types, ownership, and memory safety are not implemented.
+The proposed AI extension protocol is in `AI_PLUGIN_SPEC.md`; the compiler
+makes no network calls and runs no AI model. No speed advantage over C++ or
+Rust is claimed. Performance claims require equivalent programs, verified
+outputs, and recorded hardware, compiler versions, runtime, and memory usage.
