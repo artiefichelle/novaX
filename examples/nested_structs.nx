@@ -1,0 +1,23 @@
+struct Point { x: int, y: int }
+struct Rectangle { start: Point, end: Point }
+
+fn shifted(box: Rectangle, offset: int) -> Rectangle {
+    var copy = box;
+    copy.start.x = copy.start.x + offset;
+    copy.end.x = copy.end.x + offset;
+    return copy;
+}
+
+fn main() -> int {
+    let original = new Rectangle {
+        start: new Point {x: 1, y: 2},
+        end: new Point {x: 10, y: 20},
+    };
+    var moved = shifted(original, 5);
+    moved.start.y = 99;
+    print(original.start.x);
+    print(moved.start.x);
+    print(moved.end.x);
+    print(moved.start.y);
+    return 0;
+}
