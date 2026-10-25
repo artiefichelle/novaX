@@ -71,7 +71,7 @@ TOKEN = re.compile(
 KEYWORDS = {'fn', 'let', 'var', 'return', 'if', 'else', 'while', 'break',
             'continue', 'true', 'false', 'int', 'str', 'bool', 'struct', 'new', 'import', 'as', 'pub'}
 TYPES = {'int', 'str', 'bool', 'BoxInt'}
-BUILTINS = {'print', 'printf', 'len', 'to_bool', 'to_int', 'box', 'read_box', 'write_box'}
+BUILTINS = {'print', 'printf', 'len', 'to_bool', 'to_int', 'box', 'read_box', 'write_box', 'read_int', 'try_read_int'}
 
 
 def lex(source):
@@ -761,7 +761,15 @@ class Analyzer:
                     raise CompileError('Cannot move an outer owner in a loop condition', expr.span)
                 self.set_available(expr.name, False)
         elif isinstance(expr, Call):
-            if expr.name in ('box', 'read_box', 'write_box'):
+            if expr.name == 'read_int':
+                if expr.args: raise CompileError('Wrong number of arguments to read_int', expr.span)
+                expr.typ = 'int'
+            elif expr.name == 'try_read_int':
+                if len(expr.args) != 1: raise CompileError('Wrong number of arguments to try_read_int', expr.span)
+                symbol = self.owner(expr.args[0])
+                if not symbol.mutable: raise CompileError('try_read_int requires a mutable owner', expr.span)
+                expr.typ = 'bool'
+            elif expr.name in ('box', 'read_box', 'write_box'):
                 count = 2 if expr.name == 'write_box' else 1
                 if len(expr.args) != count: raise CompileError('Wrong number of arguments to ' + expr.name, expr.span)
                 if expr.name == 'box':

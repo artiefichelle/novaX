@@ -30,6 +30,8 @@ class Compiler:
         self.box_get=ir.Function(self.module,ir.FunctionType(I32,[BOX]),name='nx_rt_box_get')
         self.box_set=ir.Function(self.module,ir.FunctionType(I32,[BOX,I32]),name='nx_rt_box_set')
         self.box_drop=ir.Function(self.module,ir.FunctionType(ir.VoidType(),[BOX]),name='nx_rt_box_drop')
+        self.read_int=ir.Function(self.module,ir.FunctionType(I32,[]),name='nx_rt_read_int')
+        self.try_read_int=ir.Function(self.module,ir.FunctionType(I32,[BOX]),name='nx_rt_try_read_int')
         self.checked={}
         for op in ('add','sub','mul'):
             typ=ir.FunctionType(ir.LiteralStructType([I32,ir.IntType(1)]),[I32,I32])
@@ -128,6 +130,10 @@ class Compiler:
             if e.typ=='BoxInt': b.store(ir.Constant(BOX,None),slot)
             return value
         if isinstance(e,Call):
+            if e.name=='read_int': return b.call(self.read_int,[])
+            if e.name=='try_read_int':
+                status=b.call(self.try_read_int,[b.load(self.lookup(e.args[0].name)[0])])
+                return b.icmp_signed('!=',status,ir.Constant(I32,0))
             if e.name=='box': return b.call(self.box_new,[self.value(e.args[0])])
             if e.name=='read_box': return b.call(self.box_get,[b.load(self.lookup(e.args[0].name)[0])])
             if e.name=='write_box':
