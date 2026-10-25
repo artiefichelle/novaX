@@ -1,4 +1,4 @@
-# Implemented language — NOVA-X 0.6
+# Implemented language — NOVA-X 0.7
 
 This document specifies implemented behavior, not planned features.
 
@@ -25,10 +25,11 @@ after the loop. Statements after an unconditional transfer are rejected.
 
 - `int`: signed i32, from -2147483648 through 2147483647.
 - `bool`: a distinct truth value, `true` or `false`.
+- `int[N]`: a local fixed-size array of N integers; N is 0 through 4096.
 - `str`: a reference to immutable, NUL-terminated UTF-8 static storage.
 - `let name = expression;` creates an immutable binding.
 - `var name: int = expression;` creates a mutable binding with a checked annotation.
-- An omitted annotation is inferred. A binding's type cannot change.
+- An omitted annotation is inferred. A binding's type cannot change, including an array's size.
 - Blocks create lexical scopes; shadowing in a nested scope is allowed.
 - Conditions accept only `bool`. There are no implicit conversions between
   `int`, `bool`, and `str`. `to_bool(int)` explicitly tests nonzero;
@@ -86,6 +87,8 @@ loops. A simple expression statement must be a function call.
 
 `print(int)` uses decimal output; `print(str)` writes text as data. `print(bool)` writes `true` or `false`. All append
 a newline. `len(str) -> int` counts UTF-8 bytes, not Unicode characters.
+`len(array) -> int` returns the number of elements. Array-literal arguments
+to `len` are evaluated left-to-right, including element side effects.
 `to_bool(int) -> bool` and `to_int(bool) -> int` are explicit conversions.
 `print`, `printf`, `len`, `to_bool`, and `to_int` cannot be declared as user functions. Runtime
 errors write `nova runtime error: ...` to stderr and terminate with code 1.
@@ -113,3 +116,32 @@ The front end limits sources to 1 MiB of UTF-8, 100,000 non-comment tokens, and
 128 tracked parser nesting levels. Python recursion limits can also reject very
 deep expression trees; those failures are converted to diagnostics. These bounds
 are implementation limits, not a security sandbox or a complete fuzzing audit.
+
+## Local arrays
+
+An array literal `[10, 20, 30]` has type `int[3]`; `[]` has type `int[0]`.
+A trailing comma is allowed. Only integer elements are accepted. Array sizes
+are compile-time constants and must match any annotation or reassignment target.
+
+Arrays are values: `let b = a;` copies the elements, without aliasing the source.
+`var a = [1, 2]; a[0] = 3;` changes a mutable array; `let` prohibits both element
+writes and whole-array reassignment. Arrays must be initialized at declaration.
+Each local slot is allocated once per function invocation, including inside loops;
+a declaration's initializer still runs on each execution of that declaration.
+
+Only named local arrays can be indexed, with an `int` index. Reads and writes
+require `0 <= index < len(array)`. An invalid index terminates with exit code 1
+and `nova runtime error: array index out of bounds` on stderr. The check remains
+active at every optimization level. Empty arrays have no valid index.
+
+For `a[index] = value`, the index is evaluated once and checked before the RHS
+is evaluated. Array literals evaluate elements left-to-right. Array values may
+be copied or assigned to same-size locals, but cannot escape through function
+parameters, return values, pointers, references, or closures. Those interfaces
+are not implemented. Indexing temporary literals, multidimensional arrays,
+non-int arrays, slices, dynamic allocation, resizing, comparison, printing entire
+arrays, and element compound assignment are also not implemented.
+
+LLVM storage is `[N x i32]` on the function stack. The per-array size limit does
+not cap total stack use: many large locals and recursion can still exhaust the
+host stack. Arrays introduce no ownership or borrowing model.

@@ -1,13 +1,13 @@
-# NOVA-X 0.6 — experimental systems-language compiler
+# NOVA-X 0.7 — experimental systems-language compiler
 
 NOVA-X compiles a small typed language to LLVM IR and native executables via
-Clang. The goal is a systems language; version 0.6 is a tested foundation,
+Clang. The goal is a systems language; version 0.7 is a tested foundation,
 not a complete replacement for C++ or Rust. See `ROADMAP.md` for unfinished work
 and `LANGUAGE.md` for the implemented language rules.
 
 ## Quick start
 
-Clone this repository, or extract `nova-x-compiler-v0.6.zip` and enter `nova-x`.
+Clone this repository, or extract `nova-x-compiler-v0.7.zip` and enter `nova-x`.
 Requirements: Python 3.10+, the dependency in `requirements.txt`, and Clang with
 a C11-capable system toolchain. Native validation was performed on macOS ARM64;
 other targets have not yet been validated.
@@ -49,7 +49,31 @@ fn main() -> int {
 }
 ```
 
-## New in 0.6 — distinct Boolean values
+## New in 0.7 — local fixed-size integer arrays
+
+```text
+var values: int[3] = [10, 20, 30];
+let original = values;
+values[1] = 25;
+print(values[1]);
+print(original[1]); // Still 20: arrays are copied by value.
+print(len(values));
+```
+
+- `int[N]` is a fixed-size local array, with inferred sizes for array literals.
+- All elements must be integers; sizes range from 0 through 4096.
+- Index reads and writes check both bounds, including negative indices.
+- `var` permits element writes and same-size whole-array assignment; `let` does not.
+- `len(array)` returns its element count; `len(str)` still counts UTF-8 bytes.
+- Arrays have value semantics and local stack storage. They cannot be parameters
+  or return values and do not expose pointers or references.
+- Only named local arrays may be indexed. No nested arrays, slices, resizing,
+  Boolean/string arrays, array comparisons, array printing, or element compound
+  assignments are implemented. Use `a[i] = value` for element writes.
+- The suite now has 67 tests, including bounds failures and array behavior at
+  `-O0` and `-O3`. Try `examples/arrays.nx` (outputs 105, 20, 25, 4).
+
+## Added in 0.6 — distinct Boolean values
 
 - `bool` is a distinct type for bindings, parameters, and return values.
 - `true` / `false`, comparisons, `!`, `&&`, and `||` produce Boolean values.
@@ -121,7 +145,7 @@ short-circuit behavior, type errors, text, nested loops, symbol isolation,
 stack-slot placement, and CLI file preservation. Run the suite locally.
 
 Strings refer to immutable static data; no heap allocation or ownership model
-exists yet. Arrays, structs, pointers, references, modules, file I/O, a package
+exists yet. Structs, slices, pointers, references, modules, file I/O, a package
 manager, debugger integration, and a formal memory-safety model remain future
 work. Text concatenation and input are not implemented. This compiler is
 experimental and should only compile trusted programs.

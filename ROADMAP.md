@@ -1,8 +1,8 @@
 # Toward a NOVA-X systems language
 
 The user's intended direction is a systems language similar in purpose to C++
-or Rust. A version number does not establish completeness. Version 0.6 is a
-foundation with three types, static text, native code generation, and checked
+or Rust. A version number does not establish completeness. Version 0.7 is a
+foundation with three primitive types, local integer arrays, static text, native code generation, and checked
 integer operations. The following capabilities are not implemented.
 
 ## Before a 1.0 scope can be frozen
@@ -10,13 +10,23 @@ integer operations. The following capabilities are not implemented.
 1. Define supported targets, ABI, compatibility policy, and intended memory model.
 2. Extend the type system with integer-width, floating-point, and character types;
    conversions, literals, overflow policy, and layout rules.
-3. Design structs, enums, arrays, slices, initialization, and bounds checking.
+3. Extend local integer arrays to a specified aggregate model: structs, enums,
+   slices, additional element types, and safe parameter/return rules.
 4. Choose an explicit ownership/lifetime model before adding mutable references,
    pointers, allocation, deallocation, and FFI. Do not claim Rust-like safety
    without enforcement and adversarial validation.
 5. Define modules, visibility, imports, dependencies, and reproducible builds.
 6. Define error handling and the standard library: text, I/O, files, collections,
    command-line arguments, and process/environment access.
+
+## Completed in 0.7
+
+- [x] Local fixed-size `int[N]` arrays, inferred/annotated sizes, initialization,
+  by-value copies, same-size reassignment, and mutable element writes.
+- [x] Checked read/write indexing at all optimization levels and `len(array)`.
+- [x] Define local storage/lifetime restrictions before exposing array references.
+- [x] Native and frontend tests for bounds, copying, evaluation order, empty arrays,
+  type/mutability errors, and size limits; publish a runnable array example.
 
 ## Completed in 0.6
 
