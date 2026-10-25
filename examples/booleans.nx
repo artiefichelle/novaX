@@ -1,0 +1,17 @@
+fn in_range(value: int, low: int, high: int) -> bool {
+    return value >= low && value <= high;
+}
+
+fn main() -> int {
+    let ready: bool = in_range(42, 0, 100);
+    var enabled = ready;
+    if enabled {
+        print("Ready");
+    }
+    print(enabled);
+    enabled = !enabled;
+    print(enabled);
+    print(to_int(ready));
+    print(to_bool(0));
+    return 0;
+}

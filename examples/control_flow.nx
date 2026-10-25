@@ -1,7 +1,7 @@
 /* NOVA-X 0.2: loop control, else-if, calls, and short-circuit logic. */
-fn greet() -> int {
+fn greet() -> bool {
     print(42);
-    return 1;
+    return true;
 }
 
 fn main() -> int {

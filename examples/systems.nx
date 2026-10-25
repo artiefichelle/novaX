@@ -1,4 +1,4 @@
-fn select(flag: int, name: str) -> str {
+fn select(flag: bool, name: str) -> str {
     if flag { return name; }
     return "NOVA-X";
 }

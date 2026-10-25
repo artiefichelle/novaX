@@ -1,5 +1,5 @@
 /* NOVA-X 0.3: typed strings with static storage. */
-fn choose(flag: int, name: str) -> str {
+fn choose(flag: bool, name: str) -> str {
     if flag { return name; }
     return "NOVA-X";
 }
