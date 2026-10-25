@@ -1,0 +1,17 @@
+fn select(flag: int, name: str) -> str {
+    if flag { return name; }
+    return "NOVA-X";
+}
+
+fn main() -> int {
+    var count = 0;
+    while count < 3 {
+        count += 1;
+        print(count);
+    }
+    let message: str = select(true, "Hallo Welt 🌍");
+    print(message);
+    print(len(message));
+    print(message != "");
+    return 0;
+}
