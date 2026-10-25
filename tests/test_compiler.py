@@ -189,7 +189,7 @@ class SystemsFoundationTests(unittest.TestCase):
     def test_cli_check_and_version(self):
         version=subprocess.run([sys.executable,str(COMPILER),'--version'],capture_output=True,text=True,timeout=20)
         self.assertEqual(version.returncode,0,version.stderr)
-        self.assertIn('0.6.0',version.stdout)
+        self.assertIn('0.7.0',version.stdout)
         with tempfile.TemporaryDirectory() as d:
             source=Path(d)/'input.nx'; source.write_text('fn main() -> int {return 0;}')
             output=Path(d)/'absent'
@@ -285,6 +285,73 @@ class BooleanTests(unittest.TestCase):
             p,_,_=self.compile_source(source)
             self.assertNotEqual(p.returncode,0)
             self.assertNotIn('Traceback',p.stderr)
+
+class ArrayTests(unittest.TestCase):
+    compile_source=CompilerTests.compile_source
+    native=LanguageV02Tests.native
+
+    def test_array_copy_mutation_and_assignment(self):
+        self.native('fn main() -> int {var a:int[3]=[1,2,3];let copy=a;'
+                    'a[0]=10;print(copy[0]);print(a[0]);a=[4,5,6];'
+                    'print(a[2]);print(len(a));return 0;}', '1\n10\n6\n3\n')
+
+    def test_array_sum_and_loop_initialization(self):
+        self.native('fn main() -> int {let a=[10,20,30,];var i=0;var sum=0;'
+                    'while i<len(a) {let local=[i,2];sum+=a[i]+local[0];i+=1;}'
+                    'print(sum);return 0;}', '63\n')
+
+    def test_empty_array_length(self):
+        self.native('fn main() -> int {let a:int[0]=[];print(len(a));print(len([]));return 0;}', '0\n0\n')
+
+    def test_array_side_effect_order(self):
+        self.native('fn index() -> int {print(1);return 0;} '
+                    'fn value() -> int {print(2);return 7;} '
+                    'fn main() -> int {var a=[0];a[index()]=value();'
+                    'print(a[0]);print(len([value(),value()]));return 0;}', '1\n2\n7\n2\n2\n2\n')
+
+    def test_bounds_failures(self):
+        for level in ('0','3'):
+            for body in ('let a=[1];print(a[-1]);','let a=[1];print(a[1]);',
+                         'var a=[1];a[-1]=0;','var a=[1];a[1]=0;',
+                         'let a=[];print(a[0]);'):
+                with self.subTest(level=level,body=body):
+                    p,_,exe=self.compile_source('fn main() -> int {'+body+'return 0;}',False,level)
+                    self.assertEqual(p.returncode,0,p.stderr)
+                    self.assertEqual(exe.returncode,1)
+                    self.assertIn('array index out of bounds',exe.stderr)
+
+    def test_short_circuit_skips_index_error(self):
+        self.native('fn main() -> int {let a=[];print(false && a[0]==1);'
+                    'print(true || a[-1]==1);return 0;}', 'false\ntrue\n')
+
+    def test_array_type_and_mutability_errors(self):
+        bodies=['let a=[1];a[0]=2;', 'let a=[true];', 'let a=["x"];',
+                'let a=[[1]];', 'let a:int[2]=[1];', 'var a=[1];a=[1,2];',
+                'let a=[1];print(a[true]);', 'let a="x";print(a[0]);',
+                'var a=[1];a[0]=false;', 'var a=[1];a[0]+=1;',
+                'let a=[1];print(a);', 'let a=[1];print(a==a);',
+                'let a=[1];print(a+1);','let a:bool[1]=[true];',
+                'let a=[1];print([1][0]);']
+        for body in bodies:
+            with self.subTest(body=body):
+                p,_,_=self.compile_source('fn main() -> int {'+body+'return 0;}')
+                self.assertNotEqual(p.returncode,0)
+                self.assertIn('test.nx:1:',p.stderr)
+                self.assertNotIn('Traceback',p.stderr)
+
+    def test_array_parameters_and_returns_rejected(self):
+        for source in ('fn f(a:int[1]) -> int {return 0;} fn main() -> int {return 0;}',
+                       'fn f() -> int[1] {return [1];} fn main() -> int {return 0;}'):
+            p,_,_=self.compile_source(source)
+            self.assertNotEqual(p.returncode,0)
+            self.assertIn('arrays must be local',p.stderr)
+
+    def test_array_size_limit(self):
+        for declaration in ('let a:int[4097]=[];','let a:int[-1]=[];',
+                            'let a=['+','.join('0' for _ in range(4097))+'];'):
+            p,_,_=self.compile_source('fn main() -> int {'+declaration+'return 0;}')
+            self.assertNotEqual(p.returncode,0)
+            self.assertIn('4096',p.stderr)
 
 if __name__=='__main__':unittest.main()
 

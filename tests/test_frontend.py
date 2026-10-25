@@ -8,7 +8,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
 from frontend import (Analyzer, Binary, Call, CompileError, Decl, Literal, Name,
-                      Parser, Program, Source, Span, Unary, analyze_source, lex,
+                      Parser, Program, Source, Span, Unary, ArrayType, ArrayLiteral, Index, IndexAssign, analyze_source, lex,
                       optimize_program, parse_source)
 
 
@@ -136,6 +136,24 @@ class AnalyzerTests(unittest.TestCase):
             with self.subTest(expression=expression):
                 with self.assertRaises(CompileError):
                     analyze_source('fn main() -> int {print('+expression+');return 0;}')
+
+    def test_array_nodes_and_types(self):
+        program = analyze_source('fn main() -> int {var a:int[2]=[1,2];a[0]=3;return a[1];}')
+        declaration, assignment, returned = program.functions[0].body
+        self.assertIsInstance(declaration.value, ArrayLiteral)
+        self.assertEqual(declaration.value.typ, ArrayType(2))
+        self.assertIsInstance(assignment, IndexAssign)
+        self.assertEqual(assignment.target.typ, 'int')
+        self.assertIsInstance(returned.value, Index)
+        self.assertEqual(returned.value.typ, 'int')
+
+    def test_array_optimizer_preserves_structure(self):
+        program = analyze_source('fn main() -> int {var a=[1+2];a[0]=3*4;return a[0];}')
+        program, report = optimize_program(program)
+        declaration, assignment, _ = program.functions[0].body
+        self.assertEqual(declaration.value.elements[0].value, 3)
+        self.assertEqual(assignment.value.value, 12)
+        self.assertEqual(report['constant_folds'], 2)
 
     def test_validate_before_optimization(self):
         for expression in ('2147483648 - 1', 'false && missing()', 'true || "text"'):
