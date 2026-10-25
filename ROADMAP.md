@@ -1,14 +1,14 @@
 # Toward a NOVA-X systems language
 
 The user's intended direction is a systems language similar in purpose to C++
-or Rust. A version number does not establish completeness. Version 0.5 is a
-foundation with two types, static text, native code generation, and checked
+or Rust. A version number does not establish completeness. Version 0.6 is a
+foundation with three types, static text, native code generation, and checked
 integer operations. The following capabilities are not implemented.
 
 ## Before a 1.0 scope can be frozen
 
 1. Define supported targets, ABI, compatibility policy, and intended memory model.
-2. Design distinct Boolean, integer-width, floating-point, and character types;
+2. Extend the type system with integer-width, floating-point, and character types;
    conversions, literals, overflow policy, and layout rules.
 3. Design structs, enums, arrays, slices, initialization, and bounds checking.
 4. Choose an explicit ownership/lifetime model before adding mutable references,
@@ -17,6 +17,14 @@ integer operations. The following capabilities are not implemented.
 5. Define modules, visibility, imports, dependencies, and reproducible builds.
 6. Define error handling and the standard library: text, I/O, files, collections,
    command-line arguments, and process/environment access.
+
+## Completed in 0.6
+
+- [x] Introduce a distinct `bool` type with typed variables, functions, comparisons,
+  and explicit integer/Boolean conversions.
+- [x] Require Boolean conditions and logical operands; reject accidental arithmetic
+  or implicit conversions involving truth values.
+- [x] Publish migration rules, update examples, and add frontend/backend tests.
 
 ## Completed in 0.5
 

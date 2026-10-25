@@ -1,4 +1,4 @@
-# NOVA-X 0.5 compiler architecture and policy
+# NOVA-X 0.6 compiler architecture and policy
 
 ## Pipeline
 
@@ -9,7 +9,7 @@
    LLVM and does not resolve types.
 4. `frontend.Analyzer().analyze(program)` resolves function/variable names,
    validates types, mutability, calls and control flow, and annotates every
-   expression with `int` or `str`. Invalid programs stop here.
+   expression with `int`, `bool`, or `str`. Invalid programs stop here.
 5. `frontend.optimize_program(program)` folds valid, non-overflowing integer
    arithmetic and retains the original expression span and inferred type.
 6. `backend.Compiler(program)` lowers analyzed nodes into LLVM IR.
@@ -33,7 +33,7 @@ not covered by a stable compatibility promise.
 
 ## ABI and memory policy
 
-`int` is LLVM i32. `str` is a pointer to immutable NUL-terminated UTF-8 static
+`int` is LLVM i32; `bool` is LLVM i1. `str` is a pointer to immutable NUL-terminated UTF-8 static
 storage. Calls use the LLVM/Clang host convention. User symbols are prefixed by
 `nx_user_`, except the C entry point `main`; runtime helpers use `nx_rt_`.
 This is an internal ABI and is not a supported external-function interface.

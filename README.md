@@ -1,13 +1,13 @@
-# NOVA-X 0.5 — experimental systems-language compiler
+# NOVA-X 0.6 — experimental systems-language compiler
 
 NOVA-X compiles a small typed language to LLVM IR and native executables via
-Clang. The goal is a systems language; version 0.5 is a tested foundation,
+Clang. The goal is a systems language; version 0.6 is a tested foundation,
 not a complete replacement for C++ or Rust. See `ROADMAP.md` for unfinished work
 and `LANGUAGE.md` for the implemented language rules.
 
 ## Quick start
 
-Clone this repository, or extract `nova-x-compiler-v0.5.zip` and enter `nova-x`.
+Clone this repository, or extract `nova-x-compiler-v0.6.zip` and enter `nova-x`.
 Requirements: Python 3.10+, the dependency in `requirements.txt`, and Clang with
 a C11-capable system toolchain. Native validation was performed on macOS ARM64;
 other targets have not yet been validated.
@@ -30,7 +30,7 @@ link that IR with `src/runtime.c` to build an executable manually.
 ## Example
 
 ```text
-fn select(flag: int, name: str) -> str {
+fn select(flag: bool, name: str) -> str {
     if flag { return name; }
     return "NOVA-X";
 }
@@ -49,7 +49,29 @@ fn main() -> int {
 }
 ```
 
-## New in 0.5
+## New in 0.6 — distinct Boolean values
+
+- `bool` is a distinct type for bindings, parameters, and return values.
+- `true` / `false`, comparisons, `!`, `&&`, and `||` produce Boolean values.
+- `if`, `while`, `!`, `&&`, and `||` require Boolean operands.
+- `print(bool)` writes `true` or `false`. Boolean values support `==` / `!=`;
+  arithmetic and ordering on Boolean values are rejected.
+- Explicit `to_bool(int)` maps zero to false and nonzero to true.
+  `to_int(bool)` maps false to 0 and true to 1.
+- The complete suite now has 56 tests, including positive and negative type
+  tests and native Boolean calls and short-circuit behavior at `-O0` / `-O3`.
+
+### Migration from 0.5
+
+This is an intentional source-compatibility change in an experimental release.
+Replace `if number` / `while number` with `if number != 0` / `while number != 0`
+or use `to_bool(number)`. Change predicate parameters and return types to `bool`.
+Use `to_int(comparison)` where a numeric result is required. Output of Boolean
+expressions changes from `0` / `1` to `false` / `true`.
+All shipped examples have been migrated; older release ZIPs remain unchanged.
+See `examples/booleans.nx` for a complete example.
+
+## Added in 0.5
 
 - A source-spanned, typed dataclass AST replaces the tuple-based AST.
 - Lexer, parser, name resolution, type checking, and control-flow validation live
@@ -86,11 +108,11 @@ See `ARCHITECTURE.md` for compiler stages and the current target/ABI policy.
 
 ## Existing features
 
-`int` and `str`, inferred or explicit variable types, immutable `let`, mutable
+`int`, `bool`, and `str`, inferred or explicit variable types, immutable `let`, mutable
 `var`, typed functions and returns, recursion, `print`, lexical scopes,
 `if` / `else if` / `else`, `while`, `break`, `continue`, short-circuit logic,
 UTF-8 text and JSON-style escapes, line and non-nested block comments.
-`true` and `false` are integer values 1 and 0. No separate Boolean type exists.
+`true` and `false` have type `bool`; conversions to and from `int` are explicit.
 
 ## Validation and limits
 

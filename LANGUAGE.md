@@ -1,4 +1,4 @@
-# Implemented language — NOVA-X 0.5
+# Implemented language — NOVA-X 0.6
 
 This document specifies implemented behavior, not planned features.
 
@@ -24,13 +24,15 @@ after the loop. Statements after an unconditional transfer are rejected.
 ## Types and bindings
 
 - `int`: signed i32, from -2147483648 through 2147483647.
+- `bool`: a distinct truth value, `true` or `false`.
 - `str`: a reference to immutable, NUL-terminated UTF-8 static storage.
 - `let name = expression;` creates an immutable binding.
 - `var name: int = expression;` creates a mutable binding with a checked annotation.
 - An omitted annotation is inferred. A binding's type cannot change.
 - Blocks create lexical scopes; shadowing in a nested scope is allowed.
-- `true` is integer 1; `false` is integer 0. Conditions accept only integers;
-  zero is false and any nonzero integer is true.
+- Conditions accept only `bool`. There are no implicit conversions between
+  `int`, `bool`, and `str`. `to_bool(int)` explicitly tests nonzero;
+  `to_int(bool)` explicitly returns 0 or 1.
 
 String literals use double quotes and JSON escape syntax. Embedded NUL and
 invalid Unicode surrogates are rejected. Literal storage remains valid for the
@@ -51,8 +53,8 @@ Precedence, from low to high:
 | Unary `- !` | Checked negation / logical NOT |
 
 Binary operators at the same precedence associate left-to-right. Operands and
-function arguments are evaluated left-to-right. Logical operators skip their
-right operand when possible and return integer 0 or 1. Static type checking
+function arguments are evaluated left-to-right. Logical operators require Boolean operands, skip their
+right operand when possible, and return `bool`. Static type checking
 still checks skipped operands.
 
 Arithmetic accepts integers only. Overflow causes a runtime error; there is no
@@ -60,9 +62,11 @@ implicit wrapping. Division truncates toward zero. Remainder has the dividend's
 sign. Zero divisors and the pair `-2147483648`, `-1` for either `/` or `%` cause
 runtime errors, including inside optimized builds.
 
-Comparisons accept two operands of the same type. Integer comparisons are
-signed; string comparisons compare UTF-8 byte sequences by content (not pointer
-identity), without locale or normalization. They return integer 0 or 1.
+Comparisons accept two operands of the same type and return `bool`. Integer
+comparisons are signed; string comparisons compare UTF-8 byte sequences by
+content (not pointer identity), without locale or normalization. Boolean values
+support equality and inequality only; their ordering is not defined. Unary `!`
+requires and returns `bool`; unary negation requires and returns `int`.
 
 ## Statements and built-ins
 
@@ -80,9 +84,10 @@ return expression;
 `break` and `continue` target the innermost `while`. Both are invalid outside
 loops. A simple expression statement must be a function call.
 
-`print(int)` uses decimal output; `print(str)` writes text as data. Both append
+`print(int)` uses decimal output; `print(str)` writes text as data. `print(bool)` writes `true` or `false`. All append
 a newline. `len(str) -> int` counts UTF-8 bytes, not Unicode characters.
-`print`, `printf`, and `len` cannot be declared as user functions. Runtime
+`to_bool(int) -> bool` and `to_int(bool) -> int` are explicit conversions.
+`print`, `printf`, `len`, `to_bool`, and `to_int` cannot be declared as user functions. Runtime
 errors write `nova runtime error: ...` to stderr and terminate with code 1.
 
 Line comments start with `//`. Block comments use `/* ... */` and cannot nest.
@@ -90,7 +95,7 @@ Line comments start with `//`. Block comments use `/* ... */` and cannot nest.
 
 ## Host ABI and runtime
 
-Integers lower to LLVM i32; strings lower to pointers to static UTF-8 bytes.
+Integers lower to LLVM i32, Boolean values to LLVM i1; strings lower to pointers to static UTF-8 bytes.
 User function symbols are prefixed with `nx_user_`, except `main`. This is an
 internal ABI, not a stable FFI. The C runtime supplies text comparison, byte
 length, and runtime failure reporting. Local stack slots are allocated once at
