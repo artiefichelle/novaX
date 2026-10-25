@@ -586,6 +586,12 @@ class Symbol:
     available: bool = True
 
 
+@dataclass
+class LoopState:
+    entry: list[dict[str, Symbol]]
+    breaks: list[list[dict[str, Symbol]]] = field(default_factory=list)
+
+
 class Analyzer:
     """Resolve names, annotate expression types and validate control flow."""
     def analyze(self, program):
@@ -644,7 +650,8 @@ class Analyzer:
             for fn in program.functions:
                 self.scopes = [{}]
                 self.loops = 0
-                self.loop_depths = []
+                self.condition_depths = []
+                self.loop_states = []
                 self.returns = fn.returns
                 for arg in fn.args:
                     if arg.name in self.scopes[0]:
@@ -681,6 +688,26 @@ class Analyzer:
                 old = scope[name]
                 scope[name] = Symbol(old.typ, old.mutable, available)
                 return
+
+    def snapshot(self):
+        # Symbols are immutable, so copying the scope dictionaries is sufficient.
+        return [dict(scope) for scope in self.scopes]
+
+    def merge(self, states):
+        # Only states reaching the same continuation participate in its join.
+        self.scopes = [dict(scope) for scope in states[0]]
+        for i, scope in enumerate(self.scopes):
+            for name, symbol in list(scope.items()):
+                available = all(state[i][name].available for state in states)
+                scope[name] = Symbol(symbol.typ, symbol.mutable, available)
+
+    def check_backedge(self, loop, span):
+        # Preserve the loop-header availability invariant before any next iteration.
+        # Bindings created inside the loop are dropped rather than carried back.
+        for i, scope in enumerate(loop.entry):
+            for name, symbol in scope.items():
+                if symbol.typ == 'BoxInt' and symbol.available and not self.scopes[i][name].available:
+                    raise CompileError('Loop backedge requires reinitializing owner: ' + name, span)
 
     def expect(self, expression, wanted, context):
         actual = self.expression(expression)
@@ -730,8 +757,8 @@ class Analyzer:
             if expr.typ == 'BoxInt':
                 self.owner(expr)
                 index = next(i for i in range(len(self.scopes)-1, -1, -1) if expr.name in self.scopes[i])
-                if self.loop_depths and index < self.loop_depths[-1]:
-                    raise CompileError('Cannot move an outer owner inside a loop', expr.span)
+                if self.condition_depths and index < self.condition_depths[-1]:
+                    raise CompileError('Cannot move an outer owner in a loop condition', expr.span)
                 self.set_available(expr.name, False)
         elif isinstance(expr, Call):
             if expr.name in ('box', 'read_box', 'write_box'):
@@ -842,30 +869,39 @@ class Analyzer:
             elif isinstance(stmt, Transfer):
                 if not self.loops:
                     raise CompileError(stmt.kind + ' is only allowed inside a loop', stmt.span)
+                loop = self.loop_states[-1]
+                if stmt.kind == 'continue':
+                    self.check_backedge(loop, stmt.span)
+                else:
+                    loop.breaks.append(self.snapshot()[:len(loop.entry)])
                 terminated = True
             elif isinstance(stmt, If):
                 self.expect(stmt.condition, 'bool', 'if condition')
-                before = [dict(scope) for scope in self.scopes]
+                before = self.snapshot()
                 yes = self.block(stmt.yes)
-                after_yes = self.scopes
+                after_yes = self.snapshot()
                 self.scopes = [dict(scope) for scope in before]
                 no = self.block(stmt.no)
-                for i, scope in enumerate(self.scopes):
-                    for name, symbol in list(scope.items()):
-                        available = symbol.available and after_yes[i][name].available
-                        scope[name] = Symbol(symbol.typ, symbol.mutable, available)
+                after_no = self.snapshot()
+                continuing = []
+                if not yes: continuing.append(after_yes)
+                if not no: continuing.append(after_no)
+                self.merge(continuing or [before])
                 terminated = yes and no
             elif isinstance(stmt, While):
-                before_loop = [dict(scope) for scope in self.scopes]
-                self.loop_depths.append(len(self.scopes))
+                loop = LoopState(self.snapshot())
+                self.condition_depths.append(len(self.scopes))
                 self.expect(stmt.condition, 'bool', 'while condition')
+                self.condition_depths.pop()
                 self.loops += 1
-                self.block(stmt.body)
+                self.loop_states.append(loop)
+                body_terminated = self.block(stmt.body)
+                if not body_terminated: self.check_backedge(loop, stmt.span)
+                self.loop_states.pop()
                 self.loops -= 1
-                self.loop_depths.pop()
-                for i, scope in enumerate(self.scopes):
-                    for name, symbol in list(scope.items()):
-                        scope[name] = Symbol(symbol.typ, symbol.mutable, symbol.available and before_loop[i][name].available)
+                # A false condition can exit before the first iteration. Backedges
+                # preserve entry availability; breaks may additionally move owners.
+                self.merge([loop.entry] + loop.breaks)
             else:
                 raise TypeError('Unknown statement node: ' + type(stmt).__name__)
         self.scopes.pop()
