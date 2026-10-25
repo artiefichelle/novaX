@@ -189,7 +189,7 @@ class SystemsFoundationTests(unittest.TestCase):
     def test_cli_check_and_version(self):
         version=subprocess.run([sys.executable,str(COMPILER),'--version'],capture_output=True,text=True,timeout=20)
         self.assertEqual(version.returncode,0,version.stderr)
-        self.assertIn('0.4.0',version.stdout)
+        self.assertIn('0.5.0',version.stdout)
         with tempfile.TemporaryDirectory() as d:
             source=Path(d)/'input.nx'; source.write_text('fn main() -> int {return 0;}')
             output=Path(d)/'absent'
@@ -208,6 +208,33 @@ class SystemsFoundationTests(unittest.TestCase):
             result=subprocess.run([sys.executable,str(COMPILER),str(source),'-o',str(Path(d)/'program')],capture_output=True,text=True,timeout=20)
             self.assertEqual(result.returncode,0,result.stderr)
             self.assertEqual(sentinel.read_text(),'keep this')
+
+class ArchitectureRegressionTests(unittest.TestCase):
+    compile_source=CompilerTests.compile_source
+    native=LanguageV02Tests.native
+
+    def test_generated_integer_expressions_against_reference(self):
+        import random
+        rng=random.Random(501)
+        def expression(depth):
+            if not depth:
+                n=rng.randint(-12,12)
+                return str(n),n
+            left,a=expression(depth-1)
+            right,b=expression(depth-1)
+            op=rng.choice(['+','-','*'])
+            value={'+':lambda:a+b,'-':lambda:a-b,'*':lambda:a*b}[op]()
+            return '('+left+op+right+')',value
+        cases=[expression(3) for _ in range(40)]
+        program='fn main() -> int {'+''.join('print('+text+');' for text,_ in cases)+'return 0;}'
+        self.native(program,''.join(str(value)+'\n' for _,value in cases))
+
+    def test_cli_source_diagnostic(self):
+        p,_,_=self.compile_source('fn main() -> int {\n  let n: int = "oops";\n  return 0;\n}')
+        self.assertNotEqual(p.returncode,0)
+        self.assertIn('test.nx:2:16: error:',p.stderr)
+        self.assertIn('^^^^^^',p.stderr)
+        self.assertNotIn('Traceback',p.stderr)
 
 if __name__=='__main__':unittest.main()
 
