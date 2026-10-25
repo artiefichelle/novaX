@@ -1,0 +1,19 @@
+// Move an outer owner, then replace it before the next iteration.
+fn choose(flag: bool) -> BoxInt {
+    let value = box(7);
+    if flag { return value; }
+    // The returning branch does not reach this statement.
+    return value;
+}
+fn main() -> int {
+    var state = choose(false);
+    var i = 0;
+    while i < 4 {
+        let previous = state;
+        state = box(read_box(previous) + 1);
+        i = i + 1;
+        if i == 2 { continue; }
+    }
+    print(read_box(state)); // 11
+    return 0;
+}
