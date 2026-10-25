@@ -1,6 +1,6 @@
 """LLVM lowering for an already analyzed NOVA-X Program."""
 from llvmlite import ir, binding
-from frontend import (CompileError, Literal, Name, Call, Unary, Binary,
+from frontend import (CompileError, Literal, Name, Call, Unary, Binary, ArrayLiteral, Index, IndexAssign, ArrayType,
                       Decl, Assign, Return, Print, ExprStmt, If, While, Transfer)
 
 I32=ir.IntType(32)
@@ -62,13 +62,28 @@ class Compiler:
         negative_one=b.icmp_signed('==',c,ir.Constant(I32,-1))
         self.guard(b.and_(minimum,negative_one),'integer overflow in division')
         return b.sdiv(a,c) if op=='/' else b.srem(a,c)
+    def index_pointer(self,target):
+        b=self.builder
+        slot,_=self.lookup(target.base.name)
+        index=self.value(target.index)
+        negative=b.icmp_signed('<',index,ir.Constant(I32,0))
+        too_large=b.icmp_signed('>=',index,ir.Constant(I32,target.base.typ.size))
+        self.guard(b.or_(negative,too_large),'array index out of bounds')
+        return b.gep(slot,[ir.Constant(I32,0),index])
     def value(self,e):
         b=self.builder
         if isinstance(e,Literal):
             return self.string_constant(e.value) if e.typ=='str' else ir.Constant(TYPES[e.typ],e.value)
+        if isinstance(e,ArrayLiteral):
+            result=ir.Constant(ir.ArrayType(I32,len(e.elements)),None)
+            for index,element in enumerate(e.elements): result=b.insert_value(result,self.value(element),index)
+            return result
+        if isinstance(e,Index): return b.load(self.index_pointer(e))
         if isinstance(e,Name): return b.load(self.lookup(e.name)[0])
         if isinstance(e,Call):
-            if e.name=='len': return b.call(self.strlen,[self.value(e.args[0])])
+            if e.name=='len':
+                value=self.value(e.args[0])
+                return ir.Constant(I32,e.args[0].typ.size) if isinstance(e.args[0].typ,ArrayType) else b.call(self.strlen,[value])
             if e.name=='to_bool': return b.icmp_signed('!=',self.value(e.args[0]),ir.Constant(I32,0))
             if e.name=='to_int': return b.zext(self.value(e.args[0]),I32)
             return b.call(self.funcs[e.name],[self.value(x) for x in e.args])
@@ -111,6 +126,9 @@ class Compiler:
             elif isinstance(s,Assign):
                 slot,_=self.lookup(s.name)
                 b.store(self.value(s.value),slot)
+            elif isinstance(s,IndexAssign):
+                pointer=self.index_pointer(s.target)
+                b.store(self.value(s.value),pointer)
             elif isinstance(s,ExprStmt): self.value(s.value)
             elif isinstance(s,Transfer): b.branch(self.loops[-1][0 if s.kind=='continue' else 1])
             elif isinstance(s,Return): b.ret(self.value(s.value))

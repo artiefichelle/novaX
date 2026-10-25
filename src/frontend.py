@@ -66,7 +66,7 @@ TOKEN = re.compile(
     r'(?P<WS>\s+)|(?P<COMMENT>//[^\n]*|/\*[\s\S]*?\*/)|'
     r'(?P<STRING>"(?:[^"\\\n]|\\.)*")|(?P<NUM>[0-9]+)|'
     r'(?P<ID>[A-Za-z_][A-Za-z_0-9]*)|'
-    r'(?P<OP>\+=|-=|\*=|/=|%=|->|==|!=|<=|>=|&&|\|\||[@+*/%(){};,:=<>!-])|(?P<BAD>.)'
+    r'(?P<OP>\+=|-=|\*=|/=|%=|->|==|!=|<=|>=|&&|\|\||[@+*/%(){}\[\];,:=<>!-])|(?P<BAD>.)'
 )
 KEYWORDS = {'fn', 'let', 'var', 'return', 'if', 'else', 'while', 'break',
             'continue', 'true', 'false', 'int', 'str', 'bool'}
@@ -98,6 +98,17 @@ def lex(source):
     return tokens
 
 
+MAX_ARRAY_SIZE = 4096
+
+
+@dataclass(frozen=True)
+class ArrayType:
+    size: int
+
+    def __str__(self):
+        return f'int[{self.size}]'
+
+
 @dataclass
 class Node:
     span: Span
@@ -105,7 +116,7 @@ class Node:
 
 @dataclass
 class Expr(Node):
-    typ: str | None = field(init=False, default=None)
+    typ: str | ArrayType | None = field(init=False, default=None)
 
 
 @dataclass
@@ -138,11 +149,28 @@ class Binary(Expr):
 
 
 @dataclass
+class ArrayLiteral(Expr):
+    elements: list[Expr]
+
+
+@dataclass
+class Index(Expr):
+    base: Expr
+    index: Expr
+
+
+@dataclass
+class IndexAssign(Node):
+    target: Index
+    value: Expr
+
+
+@dataclass
 class Decl(Node):
     mutable: bool
     name: str
     value: Expr
-    annotation: str | None
+    annotation: str | ArrayType | None
 
 
 @dataclass
@@ -187,14 +215,14 @@ class Transfer(Node):
 @dataclass
 class Parameter(Node):
     name: str
-    typ: str
+    typ: str | ArrayType
 
 
 @dataclass
 class Function(Node):
     name: str
     args: list[Parameter]
-    returns: str
+    returns: str | ArrayType
     body: list[Node]
 
 
@@ -237,6 +265,16 @@ class Parser:
         token = self.eat()
         if token.value not in TYPES:
             raise CompileError('Expected type int, str or bool', token.span)
+        if self.peek().value == '[':
+            self.eat('[')
+            size = self.eat()
+            digits = size.value.lstrip('0') or '0'
+            if size.kind != 'NUM' or len(digits) > 4 or int(digits) > MAX_ARRAY_SIZE:
+                raise CompileError('Array size must be between 0 and 4096', size.span)
+            self.eat(']')
+            if token.value != 'int':
+                raise CompileError('Only int arrays are supported', token.span)
+            return ArrayType(int(digits))
         return token.value
 
     def parse(self):
@@ -331,19 +369,24 @@ class Parser:
             self.eat()
             self.eat(';')
             return Transfer(self.span(start), kind)
-        if self.index + 1 < len(self.tokens) and self.tokens[self.index + 1].value in ('=', '+=', '-=', '*=', '/=', '%='):
-            name = self.ident()
+        target = self.expression()
+        if self.peek().value in ('=', '+=', '-=', '*=', '/=', '%='):
             op = self.eat().value
             value = self.expression()
             self.eat(';')
-            if op != '=':
-                value = Binary(self.span(start), op[0], Name(name.span, name.value), value)
-            return Assign(self.span(start), name.value, value)
-        value = self.expression()
+            if isinstance(target, Name):
+                if op != '=':
+                    value = Binary(self.span(start), op[0], target, value)
+                return Assign(self.span(start), target.name, value)
+            if isinstance(target, Index):
+                if op != '=':
+                    raise CompileError('Array elements currently support plain assignment only', target.span)
+                return IndexAssign(self.span(start), target, value)
+            raise CompileError('Invalid assignment target', target.span)
         self.eat(';')
-        if not isinstance(value, Call):
-            raise CompileError('Only function calls may be used as expression statements', value.span)
-        return ExprStmt(self.span(start), value)
+        if not isinstance(target, Call):
+            raise CompileError('Only function calls may be used as expression statements', target.span)
+        return ExprStmt(self.span(start), target)
 
     def expression(self, minimum=0):
         self.depth += 1
@@ -359,6 +402,21 @@ class Parser:
             self.eat()
             left = self.expression()
             self.eat(')')
+        elif token.value == '[':
+            self.eat()
+            elements = []
+            if self.peek().value != ']':
+                while True:
+                    elements.append(self.expression())
+                    if len(elements) > MAX_ARRAY_SIZE:
+                        raise CompileError('Array exceeds 4096 elements', self.peek().span)
+                    if self.peek().value != ',':
+                        break
+                    self.eat(',')
+                    if self.peek().value == ']':
+                        break
+            self.eat(']')
+            left = ArrayLiteral(self.span(start), elements)
         elif token.kind == 'STRING':
             self.eat()
             try:
@@ -393,6 +451,11 @@ class Parser:
                 left = Call(self.span(start), name.value, args)
             else:
                 left = Name(name.span, name.value)
+        while self.peek().value == '[':
+            self.eat('[')
+            index = self.expression()
+            self.eat(']')
+            left = Index(Span(start.source, left.span.start, self.tokens[self.index - 1].span.end), left, index)
         while self.precedence.get(self.peek().value, -1) >= minimum:
             op = self.eat().value
             right = self.expression(self.precedence[op] + 1)
@@ -403,7 +466,7 @@ class Parser:
 
 @dataclass(frozen=True)
 class Symbol:
-    typ: str
+    typ: str | ArrayType
     mutable: bool
 
 
@@ -412,6 +475,8 @@ class Analyzer:
     def analyze(self, program):
         self.functions = {}
         for fn in program.functions:
+            if isinstance(fn.returns, ArrayType) or any(isinstance(arg.typ, ArrayType) for arg in fn.args):
+                raise CompileError('Array parameters and returns are not supported; arrays must be local', fn.span)
             if fn.name in self.functions:
                 raise CompileError('Duplicate function name: ' + fn.name, fn.span)
             if fn.name in BUILTINS:
@@ -460,6 +525,16 @@ class Analyzer:
                 expr.typ = 'int'
             else:
                 expr.typ = 'str'
+        elif isinstance(expr, ArrayLiteral):
+            for element in expr.elements:
+                self.expect(element, 'int', 'Array element')
+            expr.typ = ArrayType(len(expr.elements))
+        elif isinstance(expr, Index):
+            base_type = self.expression(expr.base)
+            if not isinstance(expr.base, Name) or not isinstance(base_type, ArrayType):
+                raise CompileError('Indexing requires a named local int array', expr.base.span)
+            self.expect(expr.index, 'int', 'Array index')
+            expr.typ = 'int'
         elif isinstance(expr, Name):
             expr.typ = self.lookup(expr.name, expr.span).typ
         elif isinstance(expr, Call):
@@ -467,7 +542,12 @@ class Analyzer:
                 if len(expr.args) != 1:
                     raise CompileError('Wrong number of arguments to ' + expr.name, expr.span)
                 arg_type = {'len': 'str', 'to_bool': 'int', 'to_int': 'bool'}[expr.name]
-                self.expect(expr.args[0], arg_type, 'Argument to ' + expr.name)
+                if expr.name == 'len':
+                    actual = self.expression(expr.args[0])
+                    if actual != 'str' and not isinstance(actual, ArrayType):
+                        raise CompileError('Argument to len: expected str or array, got ' + str(actual), expr.args[0].span)
+                else:
+                    self.expect(expr.args[0], arg_type, 'Argument to ' + expr.name)
                 expr.typ = 'bool' if expr.name == 'to_bool' else 'int'
             else:
                 fn = self.functions.get(expr.name)
@@ -488,17 +568,19 @@ class Analyzer:
             left = self.expression(expr.left)
             if expr.op in ('&&', '||'):
                 if left != 'bool':
-                    raise CompileError('Operator ' + expr.op + ': expected bool, got ' + left, expr.left.span)
+                    raise CompileError('Operator ' + expr.op + ': expected bool, got ' + str(left), expr.left.span)
                 self.expect(expr.right, 'bool', 'Operator ' + expr.op)
                 expr.typ = 'bool'
             elif expr.op in ('==', '!=', '<', '>', '<=', '>='):
+                if isinstance(left, ArrayType):
+                    raise CompileError('Arrays cannot be compared directly', expr.left.span)
                 if expr.op not in ('==', '!=') and left == 'bool':
                     raise CompileError('Ordering requires int or str, got bool', expr.left.span)
                 self.expect(expr.right, left, 'Operator ' + expr.op)
                 expr.typ = 'bool'
             else:
                 if left != 'int':
-                    raise CompileError('Operator ' + expr.op + ': expected int, got ' + left, expr.left.span)
+                    raise CompileError('Operator ' + expr.op + ': expected int, got ' + str(left), expr.left.span)
                 self.expect(expr.right, 'int', 'Operator ' + expr.op)
                 expr.typ = 'int'
         else:
@@ -523,11 +605,19 @@ class Analyzer:
                 if not symbol.mutable:
                     raise CompileError('Cannot assign to immutable value: ' + stmt.name, stmt.span)
                 self.expect(stmt.value, symbol.typ, 'Assignment ' + stmt.name)
+            elif isinstance(stmt, IndexAssign):
+                self.expression(stmt.target)
+                symbol = self.lookup(stmt.target.base.name, stmt.target.span)
+                if not symbol.mutable:
+                    raise CompileError('Cannot assign to immutable array: ' + stmt.target.base.name, stmt.target.span)
+                self.expect(stmt.value, 'int', 'Array assignment')
             elif isinstance(stmt, Return):
                 self.expect(stmt.value, self.returns, 'Return')
                 terminated = True
             elif isinstance(stmt, (Print, ExprStmt)):
-                self.expression(stmt.value)
+                typ = self.expression(stmt.value)
+                if isinstance(stmt, Print) and isinstance(typ, ArrayType):
+                    raise CompileError('print does not support arrays; print individual elements', stmt.value.span)
             elif isinstance(stmt, Transfer):
                 if not self.loops:
                     raise CompileError(stmt.kind + ' is only allowed inside a loop', stmt.span)
@@ -572,6 +662,10 @@ def optimize_program(program):
                     folded.typ = 'int'
                     report['constant_folds'] += 1
                     return folded
+        elif isinstance(expr, ArrayLiteral):
+            expr.elements = [expression(element) for element in expr.elements]
+        elif isinstance(expr, Index):
+            expr.base, expr.index = expression(expr.base), expression(expr.index)
         elif isinstance(expr, Unary):
             expr.operand = expression(expr.operand)
         elif isinstance(expr, Call):
@@ -581,6 +675,9 @@ def optimize_program(program):
     def block(statements):
         for stmt in statements:
             if isinstance(stmt, (Decl, Assign, Return, Print, ExprStmt)):
+                stmt.value = expression(stmt.value)
+            elif isinstance(stmt, IndexAssign):
+                stmt.target = expression(stmt.target)
                 stmt.value = expression(stmt.value)
             elif isinstance(stmt, If):
                 stmt.condition = expression(stmt.condition)
