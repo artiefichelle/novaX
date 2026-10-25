@@ -8,11 +8,12 @@ ROOT=Path(__file__).resolve().parents[1]
 COMPILER=ROOT/'src'/'novax.py'
 
 class CompilerTests(unittest.TestCase):
-    def compile_source(self, source, emit=True, optimization="2"):
+    def compile_source(self, source, emit=True, optimization="2", extra=()):
         with tempfile.TemporaryDirectory() as d:
             path=Path(d)/'test.nx';path.write_text(source)
             cmd=[sys.executable,str(COMPILER),str(path),'-o',str(Path(d)/('test.ll' if emit else 'test'))]
             cmd.append("-O"+optimization)
+            cmd.extend(extra)
             if emit:cmd.append('--emit-llvm')
             p=subprocess.run(cmd,capture_output=True,text=True,timeout=20)
             out=Path(d)/('test.ll' if emit else 'test')
@@ -189,7 +190,7 @@ class SystemsFoundationTests(unittest.TestCase):
     def test_cli_check_and_version(self):
         version=subprocess.run([sys.executable,str(COMPILER),'--version'],capture_output=True,text=True,timeout=20)
         self.assertEqual(version.returncode,0,version.stderr)
-        self.assertIn('0.7.0',version.stdout)
+        self.assertIn('0.8.0',version.stdout)
         with tempfile.TemporaryDirectory() as d:
             source=Path(d)/'input.nx'; source.write_text('fn main() -> int {return 0;}')
             output=Path(d)/'absent'
@@ -352,6 +353,62 @@ class ArrayTests(unittest.TestCase):
             p,_,_=self.compile_source('fn main() -> int {'+declaration+'return 0;}')
             self.assertNotEqual(p.returncode,0)
             self.assertIn('4096',p.stderr)
+
+class RangeOptimizationTests(unittest.TestCase):
+    compile_source=CompilerTests.compile_source
+
+    def compare_modes(self, source, expected=None, error=None):
+        for extra in ((),('--no-range-opt',)):
+            p,_,exe=self.compile_source(source,False,'3',extra)
+            self.assertEqual(p.returncode,0,p.stderr)
+            if error:
+                self.assertEqual(exe.returncode,1)
+                self.assertIn(error,exe.stderr)
+            else:
+                self.assertEqual(exe.returncode,0,exe.stderr)
+                self.assertEqual(exe.stdout,expected)
+
+    def test_inductive_modular_loop(self):
+        source='fn main() -> int {let a=[1,3,5,7];var i=0;var sum=0;while i<10000 {sum=(sum+a[i%4])%97;i+=1;}print(sum);return 0;}'
+        self.compare_modes(source,str((2500*16)%97)+'\n')
+        p,_,_=self.compile_source(source,True,'3',('--opt-report',))
+        self.assertEqual(p.returncode,0,p.stderr)
+        self.assertIn('"modulo_reductions": 1',p.stderr)
+
+    def test_negative_modulo_not_rewritten(self):
+        self.compare_modes('fn main() -> int {var x=-3;var i=0;while i<10 {x=(x-2)%7;i+=1;}print(x);return 0;}', '-2\n')
+
+    def test_array_mutation_and_shadowing(self):
+        self.compare_modes('fn main() -> int {var a=[1];var x=0;var i=0;while i<3 {a[0]=-10;x=(x+a[0])%7;i+=1;}print(x);return 0;}', '-2\n')
+        self.compare_modes('fn main() -> int {var x=3;var i=0;while i<3 {var x=-2;x=(x-1)%5;i+=1;}print(x);return 0;}', '3\n')
+
+    def test_complex_loop_fallback(self):
+        self.compare_modes('fn main() -> int {var x=0;var i=0;while i<8 {i+=1;if i==2 {continue;}else if i==6 {break;}x=(x-3)%7;}print(x);return 0;}', '-5\n')
+
+    def test_checks_and_side_effects_preserved(self):
+        self.compare_modes('fn main() -> int {var x=2147483647;x=(x+1)%7;print(x);return 0;}',error='integer overflow')
+        self.compare_modes('fn main() -> int {var a=[1];var x=0;var i=0;while i<2 {x=(x+a[i])%7;i+=1;}print(x);return 0;}',error='array index out of bounds')
+        self.compare_modes('fn step() -> int {print(9);return 3;}fn main() -> int {var x=0;var i=0;while i<2 {x=(x+step())%7;i+=1;}print(x);return 0;}', '9\n9\n6\n')
+
+    def test_seeded_modular_loops_against_reference(self):
+        import random
+        rng=random.Random(808)
+        for _ in range(10):
+            values=[rng.randint(-20,20) for _ in range(4)]
+            modulus=rng.randint(1,31)
+            iterations=rng.randint(0,50)
+            initial=rng.randint(-50,50)
+            result=initial
+            for i in range(iterations):
+                value=result+values[i%4]
+                quotient=(abs(value)//modulus)*(-1 if value<0 else 1)
+                result=value-quotient*modulus
+            source=('fn main() -> int {let a=['+','.join(map(str,values))+'];var x='+str(initial)+';var i=0;while i<'+str(iterations)+' {x=(x+a[i%4])%'+str(modulus)+';i+=1;}print(x);return 0;}')
+            self.compare_modes(source,str(result)+'\n')
+
+    def test_modulo_threshold_and_zero_iterations(self):
+        self.compare_modes('fn main() -> int {var x=199;print(x%100);x=200;print(x%100);x=-1;print(x%100);print(2147483647%2147483647);return 0;}', '99\n0\n-1\n0\n')
+        self.compare_modes('fn main() -> int {var x=100;var i=0;while i<0 {x=(x+1)%7;i+=1;}print(x%7);return 0;}', '2\n')
 
 if __name__=='__main__':unittest.main()
 
