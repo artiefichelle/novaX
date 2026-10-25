@@ -1,15 +1,15 @@
 # What remains before a complete systems-language release
 
-NOVA-X is still experimental. Version 0.14 is not a completed C++/Rust alternative.
+NOVA-X is still experimental. Version 0.15 is not a completed C++/Rust alternative.
 This is a status checklist, not a claim that every feature below is implemented.
 
 | Area | Current state | Remaining work |
 | --- | --- | --- |
 | Primitive types | int32, bool, static UTF-8 str | More integer widths, floats, characters, conversion/layout rules |
 | Aggregates | Fixed int arrays, nested structs, value calls/returns | Array fields, more element types, enums, slices |
-| Memory | Stack/value copies, static text, unique BoxInt heap owners with moves/drops | General owned values, references, lifetimes and checked borrows |
+| Memory | Stack/value copies, static text, unique BoxInt and Text heap owners with moves/drops | General owned values, references, lifetimes and checked borrows |
 | Modules | Relative files, aliases, public names, qualified types/calls | Packages, separate compilation, field visibility, reproducible builds |
-| Standard library | print, len, Boolean conversions, checked integer console input | Text/file I/O, owned text, collections, process/environment APIs |
+| Standard library | print, len, Boolean conversions, integer console input, owned UTF-8 text and concatenation | Text input, file I/O, collections, process/environment APIs |
 | Error handling | Compile diagnostics and terminating runtime checks | A language-level recoverable error model |
 | Tooling | Native/LLVM builds, unit/integration and bounded differential tests | CI, platform matrix, coverage-guided fuzzing, formatter, LSP, debug info |
 | Speed | Specific measured optimizations and algorithm examples | Broader reproducible workloads and regression monitoring |
@@ -46,3 +46,11 @@ for an executable example. General references and lifetime checking remain open.
 
 Integer console input and EOF-controlled loops are implemented with `read_int`
 and `try_read_int`. Text/file I/O and recoverable parse errors remain unfinished.
+
+## Version 0.15 text update
+
+Owned dynamic immutable UTF-8 text is implemented with explicit borrowing
+operations, moves and automatic destruction. General references and lifetime
+checking, owned aggregate fields, text input, file APIs, more primitive types and
+automated cross-platform validation are still required before a full systems
+language can be claimed. No 1.0 or Rust-equivalent safety claim is made.

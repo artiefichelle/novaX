@@ -1,4 +1,4 @@
-# NOVA-X 0.14 compiler architecture and policy
+# NOVA-X 0.15 compiler architecture and policy
 
 ## Pipeline
 
@@ -110,3 +110,17 @@ The C runtime streams ASCII decimal tokens through a checked uint32 accumulator,
 without dynamic token allocation. INT32_MIN is handled explicitly before signed
 conversion. Output is assigned only after complete successful parsing, preserving
 the prior boxed value at EOF. Both builtins flush stdout before reading.
+
+## Owned Text lowering (0.15)
+
+The semantic owned-type set now includes BoxInt and Text. The existing immutable
+availability snapshots and loop invariants apply to both. LLVM lowering records
+the source owned type for each slot, rather than inferring ownership from its
+pointer representation. This keeps static str slots separate from owned Text
+slots and selects the correct destructor on every exit or overwrite.
+
+Text uses one C allocation containing an i32 byte length and a flexible byte
+array with a trailing NUL. Source code cannot access its layout. Borrowing runtime
+operations receive an internal opaque pointer; ordinary function arguments move
+it. Concat checks total i32 length before allocating, and allocation checks size_t
+addition. This is an unstable internal ABI, not a supported native FFI.

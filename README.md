@@ -1,13 +1,13 @@
-# NOVA-X 0.14 — experimental systems-language compiler
+# NOVA-X 0.15 — experimental systems-language compiler
 
 NOVA-X compiles a small typed language to LLVM IR and native executables via
-Clang. The goal is a systems language; version 0.14 is a tested foundation,
+Clang. The goal is a systems language; version 0.15 is a tested foundation,
 not a complete replacement for C++ or Rust. See `ROADMAP.md` for unfinished work
 and `LANGUAGE.md` for the implemented language rules.
 
 ## Quick start
 
-Clone this repository, or extract `nova-x-compiler-v0.14.zip` and enter `nova-x`.
+Clone this repository, or extract `nova-x-compiler-v0.15.zip` and enter `nova-x`.
 Requirements: Python 3.10+, the dependency in `requirements.txt`, and Clang with
 a C11-capable system toolchain. Native validation was performed on macOS ARM64;
 other targets have not yet been validated.
@@ -48,6 +48,30 @@ fn main() -> int {
     return 0;
 }
 ```
+
+## New in 0.15: owned dynamic UTF-8 text
+
+`Text` owns immutable heap-allocated UTF-8 bytes. `text("hello")` constructs an
+owner; `text_concat(a, b)` and `text_clone(a)` create independent allocations.
+`text_len(a)`, `text_byte(a, index)`, `text_equal(a, b)` and `print_text(a)` borrow
+named owners for the duration of the call. Lengths and indices count UTF-8 bytes.
+
+```nova
+let a = text("Hello ");
+let b = text("world");
+let message = text_concat(a, b);
+print_text(message);
+```
+
+Local assignment, arguments and returns move Text just like BoxInt. Scope exit,
+overwrite, return, break, continue and discarded results automatically release
+owned allocations. Static `str` remains copyable and is never freed as Text.
+See `examples/owned_text.nx` and `OWNERSHIP_DESIGN.md`.
+
+167 tests include native O0/O3 checks, module APIs, UTF-8 byte bounds, moves,
+loop replacement, and ASan/UBSan runs with zero live allocations at normal exit.
+General references, owned aggregate fields, text input and file APIs remain open;
+this release is still an experimental systems-language foundation.
 
 ## New in 0.14: integer console input
 
@@ -285,7 +309,7 @@ stack-slot placement, and CLI file preservation. Run the suite locally.
 
 Strings refer to immutable static data; BoxInt provides restricted unique heap ownership. Slices, pointers, references, file I/O, a package
 manager, debugger integration, and a formal memory-safety model remain future
-work. Text concatenation and text input are not implemented; decimal integer console input is available. This compiler is
+work. Owned Text supports concatenation; text input is not implemented. Decimal integer console input is available. This compiler is
 experimental and should only compile trusted programs.
 
 `@optimize(speed)` and `--opt-report` expose deterministic optimization only.

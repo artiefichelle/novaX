@@ -1,4 +1,4 @@
-# Implemented language — NOVA-X 0.14
+# Implemented language — NOVA-X 0.15
 
 This document specifies implemented behavior, not planned features.
 
@@ -281,3 +281,36 @@ for an executable example. General references and lifetime checking remain open.
 - These builtin names are reserved, work inside imported modules, and are
   validated during `--check` without reading standard input.
 - Runtime errors retain the existing process-exit policy without owner unwinding.
+
+## Owned Text (0.15)
+
+`Text` is distinct from static `str` and supports local, parameter and return
+annotations. It owns one immutable UTF-8 byte sequence, limited to INT32_MAX
+bytes. `let` or `var` can own it; `var` permits replacement, not byte mutation.
+
+| Builtin | Result | Semantics |
+| --- | --- | --- |
+| `text(static_string)` | Text | Allocate a copy of a `str` |
+| `text_concat(a, b)` | Text | Borrow both named owners; allocate concatenation |
+| `text_clone(a)` | Text | Borrow a named owner; allocate an independent copy |
+| `text_len(a)` | int | Borrow a named owner; return UTF-8 byte length |
+| `text_byte(a, index)` | int | Borrow an owner; return unsigned byte 0..255 with checked bounds |
+| `text_equal(a, b)` | bool | Borrow both owners; compare byte contents |
+| `print_text(a)` | int | Borrow an owner; print bytes and a newline; return byte length excluding newline |
+
+Borrowing builtins require available named Text owners; temporaries must first
+be bound to a name. `text_byte` checks that evaluating its index did not move the
+borrowed owner. Borrowing the same owner twice in concat/equality is allowed.
+No borrow value escapes a call. Assignment, initialization, ordinary function
+arguments and returns move Text; `text_clone` is the explicit copying operation.
+
+The BoxInt scope-drop and control-flow rules also apply to Text, including loop
+backedge checks and automatic release of discarded owned results. Static str and
+Text remain distinct even though their internal ABI representations are pointers.
+Whole-Text `print`, comparisons/operators, implicit conversions, array elements
+and struct fields are not supported. Use the explicit borrowing builtins.
+
+Negative or out-of-range byte indices, excessive concatenation length, allocation
+failure and detected output errors terminate with runtime diagnostics. Runtime
+error exits keep the existing no-unwinding policy. There is no character index,
+normalization, mutable text buffer, text input or file API in this version.
