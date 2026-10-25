@@ -8,7 +8,8 @@ STR=ir.IntType(8).as_pointer()
 BOOL=ir.IntType(1)
 TYPES={'int':I32,'str':STR,'bool':BOOL}
 class Compiler:
-    def __init__(self, funcs):
+    def __init__(self, funcs, ranges=None):
+        self.ranges=ranges or {}; self.modulo_reductions=0
         self.module=ir.Module(name='nova_x'); self.module.triple=binding.get_default_triple(); self.funcs={}
         for fn in funcs.functions:
             self.funcs[fn.name]=ir.Function(self.module,ir.FunctionType(TYPES[fn.returns],[TYPES[arg.typ] for arg in fn.args]),name=fn.name if fn.name=='main' else 'nx_user_'+fn.name)
@@ -112,6 +113,12 @@ class Compiler:
                     compared=b.call(self.strcmp,[a,c])
                     return b.icmp_signed(op,compared,ir.Constant(I32,0))
                 return b.icmp_signed(op,a,c)
+            bounds=self.ranges.get(id(e.left))
+            if (op=='%' and isinstance(e.right,Literal) and e.right.typ=='int'
+                    and e.right.value>0 and isinstance(bounds,tuple)
+                    and 0<=bounds[0]<=bounds[1] and bounds[1]<2*e.right.value):
+                self.modulo_reductions+=1
+                return b.select(b.icmp_signed('>=',a,c),b.sub(a,c),a)
             return self.arithmetic(op,a,c)
         raise CompileError('Invalid expression')
     def statements(self,items):

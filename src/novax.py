@@ -8,10 +8,11 @@ from llvmlite import binding
 import json
 import tempfile
 
-VERSION="0.7.0"
+VERSION="0.8.0"
 
 from frontend import CompileError, analyze_source, optimize_program
 from backend import Compiler
+from ranges import RangeAnalysis
 
 def main():
     ap=argparse.ArgumentParser(description='NOVA-X experimental systems-language compiler')
@@ -20,6 +21,7 @@ def main():
     ap.add_argument('-o','--output',default='a.out')
     ap.add_argument('--emit-llvm',action='store_true')
     ap.add_argument('--check',action='store_true',help='Type-check and verify LLVM IR without writing output')
+    ap.add_argument('--no-range-opt',action='store_true',help='Disable interval-proven modulo reduction')
     ap.add_argument('--opt-report',action='store_true',help='Print deterministic AST optimization counts')
     ap.add_argument('-O',choices=['0','1','2','3'],default='2')
     args=ap.parse_args()
@@ -28,7 +30,9 @@ def main():
         if not args.check and source == output: raise CompileError('Output must not overwrite source')
         src=source.read_text(encoding='utf8')
         ast=analyze_source(src,str(source)); ast,report=optimize_program(ast)
-        c=Compiler(ast); llvm=str(c.module)
+        facts=RangeAnalysis().analyze(ast) if args.O in ('2','3') and not args.no_range_opt else {}
+        c=Compiler(ast,facts); llvm=str(c.module)
+        report['modulo_reductions']=c.modulo_reductions
         try: binding.parse_assembly(llvm).verify()
         except RuntimeError as exc: raise CompileError('LLVM verification failed: '+str(exc))
         if args.opt_report: print(json.dumps(report,indent=2),file=sys.stderr)
