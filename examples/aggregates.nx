@@ -1,0 +1,38 @@
+struct Point {
+    x: int,
+    y: int,
+    visible: bool,
+}
+
+fn move(point: Point, dx: int) -> Point {
+    var result = point;
+    result.x = result.x + dx;
+    return result;
+}
+
+fn make_values() -> int[3] {
+    return [10, 20, 30];
+}
+
+fn sum(values: int[3]) -> int {
+    var index = 0;
+    var total = 0;
+    while index < len(values) {
+        total += values[index];
+        index += 1;
+    }
+    return total;
+}
+
+fn main() -> int {
+    let origin = new Point {x: 1, y: 2, visible: true};
+    var moved = move(origin, 5);
+    moved.y = 9;
+    print(origin.x);
+    print(moved.x);
+    print(moved.y);
+    print(moved.visible);
+    let values = make_values();
+    print(sum(values));
+    return 0;
+}
