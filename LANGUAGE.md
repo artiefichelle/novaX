@@ -1,4 +1,4 @@
-# Implemented language — NOVA-X 0.4
+# Implemented language — NOVA-X 0.5
 
 This document specifies implemented behavior, not planned features.
 
@@ -95,3 +95,16 @@ User function symbols are prefixed with `nx_user_`, except `main`. This is an
 internal ABI, not a stable FFI. The C runtime supplies text comparison, byte
 length, and runtime failure reporting. Local stack slots are allocated once at
 function entry. Recursion depth and stack capacity remain host-dependent.
+
+## Compiler diagnostics and resource limits
+
+Syntax and semantic errors identify the source file, one-based line and column,
+source excerpt, and a caret marker. Columns count Unicode code points. CRLF
+input is normalized by the CLI when reading text. The compiler validates names,
+types, call arities, mutability, returns, and control transfers before optimization
+or LLVM generation, including code on statically skipped logical RHS branches.
+
+The front end limits sources to 1 MiB of UTF-8, 100,000 non-comment tokens, and
+128 tracked parser nesting levels. Python recursion limits can also reject very
+deep expression trees; those failures are converted to diagnostics. These bounds
+are implementation limits, not a security sandbox or a complete fuzzing audit.

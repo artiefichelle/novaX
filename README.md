@@ -1,13 +1,13 @@
-# NOVA-X 0.4 — experimental systems-language compiler
+# NOVA-X 0.5 — experimental systems-language compiler
 
 NOVA-X compiles a small typed language to LLVM IR and native executables via
-Clang. The goal is a systems language; version 0.4 is a tested foundation,
+Clang. The goal is a systems language; version 0.5 is a tested foundation,
 not a complete replacement for C++ or Rust. See `ROADMAP.md` for unfinished work
 and `LANGUAGE.md` for the implemented language rules.
 
 ## Quick start
 
-Clone this repository, or extract `nova-x-compiler-v0.4.zip` and enter `nova-x`.
+Clone this repository, or extract `nova-x-compiler-v0.5.zip` and enter `nova-x`.
 Requirements: Python 3.10+, the dependency in `requirements.txt`, and Clang with
 a C11-capable system toolchain. Native validation was performed on macOS ARM64;
 other targets have not yet been validated.
@@ -23,7 +23,7 @@ python src/novax.py examples/systems.nx -o systems
 python -m unittest discover -s tests -v
 ```
 
-`src/runtime.c` must stay beside `src/novax.py`. Native builds compile both the
+`src/frontend.py`, `src/backend.py`, and `src/runtime.c` must stay beside `src/novax.py`. Native builds compile both the
 LLVM module and this runtime. `--emit-llvm -o program.ll` writes verified IR;
 link that IR with `src/runtime.c` to build an executable manually.
 
@@ -49,7 +49,28 @@ fn main() -> int {
 }
 ```
 
-## New in 0.4
+## New in 0.5
+
+- A source-spanned, typed dataclass AST replaces the tuple-based AST.
+- Lexer, parser, name resolution, type checking, and control-flow validation live
+  in `src/frontend.py`, which has no LLVM or Clang dependency.
+- `src/backend.py` lowers analyzed nodes to LLVM; `src/novax.py` runs the CLI.
+- Source errors report filename, line, column, source excerpt, and caret.
+- Semantic validation runs before optimization, including skipped logical operands.
+- Input limits: 1 MiB source, 100,000 tokens, and controlled nesting failures.
+  Huge integer literals produce diagnostics rather than Python conversion errors.
+- 49 tests, including 400 seeded malformed-input cases and 40 generated integer
+  expressions compared with a Python reference at `-O0` and `-O3`.
+
+Run only the LLVM-independent front-end suite with system Python:
+
+```bash
+python3 -m unittest discover -s tests -p test_frontend.py -v
+```
+
+See `ARCHITECTURE.md` for compiler stages and the current target/ABI policy.
+
+## Added in 0.4
 
 - Checked signed i32 addition, subtraction, multiplication, and unary negation.
   Overflow ends the program with exit code 1 and a message on stderr.
