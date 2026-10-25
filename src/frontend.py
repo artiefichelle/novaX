@@ -70,8 +70,8 @@ TOKEN = re.compile(
 )
 KEYWORDS = {'fn', 'let', 'var', 'return', 'if', 'else', 'while', 'break',
             'continue', 'true', 'false', 'int', 'str', 'bool', 'struct', 'new', 'import', 'as', 'pub'}
-TYPES = {'int', 'str', 'bool'}
-BUILTINS = {'print', 'printf', 'len', 'to_bool', 'to_int'}
+TYPES = {'int', 'str', 'bool', 'BoxInt'}
+BUILTINS = {'print', 'printf', 'len', 'to_bool', 'to_int', 'box', 'read_box', 'write_box'}
 
 
 def lex(source):
@@ -583,6 +583,7 @@ class Parser:
 class Symbol:
     typ: str | ArrayType | StructType
     mutable: bool
+    available: bool = True
 
 
 class Analyzer:
@@ -596,7 +597,7 @@ class Analyzer:
             fields = {}
             for member in definition.fields:
                 if member.name in fields: raise CompileError('Duplicate field: ' + member.name, member.span)
-                if member.typ not in TYPES and not isinstance(member.typ, StructType):
+                if member.typ == 'BoxInt' or (member.typ not in TYPES and not isinstance(member.typ, StructType)):
                     raise CompileError('Struct fields require primitive or struct types', member.span)
                 fields[member.name] = member.typ
             self.structs[definition.name] = fields
@@ -643,6 +644,7 @@ class Analyzer:
             for fn in program.functions:
                 self.scopes = [{}]
                 self.loops = 0
+                self.loop_depths = []
                 self.returns = fn.returns
                 for arg in fn.args:
                     if arg.name in self.scopes[0]:
@@ -663,6 +665,22 @@ class Analyzer:
             if name in scope:
                 return scope[name]
         raise CompileError('Unknown variable: ' + name, span)
+
+    def owner(self, expr):
+        if not isinstance(expr, Name):
+            raise CompileError('Box borrow requires a named owner', expr.span)
+        symbol = self.lookup(expr.name, expr.span)
+        if symbol.typ != 'BoxInt': raise CompileError('Expected BoxInt owner', expr.span)
+        if not symbol.available: raise CompileError('Use after move: ' + expr.name, expr.span)
+        expr.typ = 'BoxInt'
+        return symbol
+
+    def set_available(self, name, available):
+        for scope in reversed(self.scopes):
+            if name in scope:
+                old = scope[name]
+                scope[name] = Symbol(old.typ, old.mutable, available)
+                return
 
     def expect(self, expression, wanted, context):
         actual = self.expression(expression)
@@ -709,8 +727,27 @@ class Analyzer:
             expr.typ = 'int'
         elif isinstance(expr, Name):
             expr.typ = self.lookup(expr.name, expr.span).typ
+            if expr.typ == 'BoxInt':
+                self.owner(expr)
+                index = next(i for i in range(len(self.scopes)-1, -1, -1) if expr.name in self.scopes[i])
+                if self.loop_depths and index < self.loop_depths[-1]:
+                    raise CompileError('Cannot move an outer owner inside a loop', expr.span)
+                self.set_available(expr.name, False)
         elif isinstance(expr, Call):
-            if expr.name in ('len', 'to_bool', 'to_int'):
+            if expr.name in ('box', 'read_box', 'write_box'):
+                count = 2 if expr.name == 'write_box' else 1
+                if len(expr.args) != count: raise CompileError('Wrong number of arguments to ' + expr.name, expr.span)
+                if expr.name == 'box':
+                    self.expect(expr.args[0], 'int', 'box value')
+                    expr.typ = 'BoxInt'
+                else:
+                    symbol = self.owner(expr.args[0])
+                    if expr.name == 'write_box':
+                        if not symbol.mutable: raise CompileError('write_box requires a mutable owner', expr.span)
+                        self.expect(expr.args[1], 'int', 'write_box value')
+                        self.owner(expr.args[0])
+                    expr.typ = 'int'
+            elif expr.name in ('len', 'to_bool', 'to_int'):
                 if len(expr.args) != 1:
                     raise CompileError('Wrong number of arguments to ' + expr.name, expr.span)
                 arg_type = {'len': 'str', 'to_bool': 'int', 'to_int': 'bool'}[expr.name]
@@ -744,7 +781,7 @@ class Analyzer:
                 self.expect(expr.right, 'bool', 'Operator ' + expr.op)
                 expr.typ = 'bool'
             elif expr.op in ('==', '!=', '<', '>', '<=', '>='):
-                if isinstance(left, (ArrayType, StructType)):
+                if left == 'BoxInt' or isinstance(left, (ArrayType, StructType)):
                     raise CompileError('Aggregates cannot be compared directly', expr.left.span)
                 if expr.op not in ('==', '!=') and left == 'bool':
                     raise CompileError('Ordering requires int or str, got bool', expr.left.span)
@@ -778,6 +815,7 @@ class Analyzer:
                 if not symbol.mutable:
                     raise CompileError('Cannot assign to immutable value: ' + stmt.name, stmt.span)
                 self.expect(stmt.value, symbol.typ, 'Assignment ' + stmt.name)
+                self.set_available(stmt.name, True)
             elif isinstance(stmt, FieldAssign):
                 self.expression(stmt.target)
                 root = stmt.target.base
@@ -799,7 +837,7 @@ class Analyzer:
                 terminated = True
             elif isinstance(stmt, (Print, ExprStmt)):
                 typ = self.expression(stmt.value)
-                if isinstance(stmt, Print) and isinstance(typ, (ArrayType, StructType)):
+                if isinstance(stmt, Print) and (typ == 'BoxInt' or isinstance(typ, (ArrayType, StructType))):
                     raise CompileError('print does not support aggregates; print individual elements or fields', stmt.value.span)
             elif isinstance(stmt, Transfer):
                 if not self.loops:
@@ -807,13 +845,27 @@ class Analyzer:
                 terminated = True
             elif isinstance(stmt, If):
                 self.expect(stmt.condition, 'bool', 'if condition')
-                yes, no = self.block(stmt.yes), self.block(stmt.no)
+                before = [dict(scope) for scope in self.scopes]
+                yes = self.block(stmt.yes)
+                after_yes = self.scopes
+                self.scopes = [dict(scope) for scope in before]
+                no = self.block(stmt.no)
+                for i, scope in enumerate(self.scopes):
+                    for name, symbol in list(scope.items()):
+                        available = symbol.available and after_yes[i][name].available
+                        scope[name] = Symbol(symbol.typ, symbol.mutable, available)
                 terminated = yes and no
             elif isinstance(stmt, While):
+                before_loop = [dict(scope) for scope in self.scopes]
+                self.loop_depths.append(len(self.scopes))
                 self.expect(stmt.condition, 'bool', 'while condition')
                 self.loops += 1
                 self.block(stmt.body)
                 self.loops -= 1
+                self.loop_depths.pop()
+                for i, scope in enumerate(self.scopes):
+                    for name, symbol in list(scope.items()):
+                        scope[name] = Symbol(symbol.typ, symbol.mutable, symbol.available and before_loop[i][name].available)
             else:
                 raise TypeError('Unknown statement node: ' + type(stmt).__name__)
         self.scopes.pop()

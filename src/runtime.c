@@ -22,3 +22,21 @@ int32_t nx_rt_compare(const char *a, const char *b) {
     int result = strcmp(a, b);
     return (result > 0) - (result < 0);
 }
+
+/* A BoxInt has one owner; generated code moves and drops that owner. */
+int32_t *nx_rt_box_new(int32_t value) {
+    int32_t *p = malloc(sizeof(*p));
+    if (!p) nx_rt_fail("out of memory");
+    *p = value;
+    return p;
+}
+int32_t nx_rt_box_get(int32_t *p) {
+    if (!p) nx_rt_fail("invalid BoxInt owner");
+    return *p;
+}
+int32_t nx_rt_box_set(int32_t *p, int32_t value) {
+    if (!p) nx_rt_fail("invalid BoxInt owner");
+    *p = value;
+    return value;
+}
+void nx_rt_box_drop(int32_t *p) { free(p); }

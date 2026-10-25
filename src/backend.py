@@ -6,7 +6,8 @@ from frontend import (CompileError, Literal, Name, Call, Unary, Binary, ArrayLit
 I32=ir.IntType(32)
 STR=ir.IntType(8).as_pointer()
 BOOL=ir.IntType(1)
-TYPES={'int':I32,'str':STR,'bool':BOOL}
+BOX=I32.as_pointer()
+TYPES={'int':I32,'str':STR,'bool':BOOL,'BoxInt':BOX}
 class Compiler:
     def __init__(self, funcs, ranges=None):
         self.ranges=ranges or {}; self.modulo_reductions=0
@@ -25,6 +26,10 @@ class Compiler:
         self.fail.attributes.add('noreturn')
         self.strlen=ir.Function(self.module,ir.FunctionType(I32,[STR]),name='nx_rt_len')
         self.strcmp=ir.Function(self.module,ir.FunctionType(I32,[STR,STR]),name='nx_rt_compare')
+        self.box_new=ir.Function(self.module,ir.FunctionType(BOX,[I32]),name='nx_rt_box_new')
+        self.box_get=ir.Function(self.module,ir.FunctionType(I32,[BOX]),name='nx_rt_box_get')
+        self.box_set=ir.Function(self.module,ir.FunctionType(I32,[BOX,I32]),name='nx_rt_box_set')
+        self.box_drop=ir.Function(self.module,ir.FunctionType(ir.VoidType(),[BOX]),name='nx_rt_box_drop')
         self.checked={}
         for op in ('add','sub','mul'):
             typ=ir.FunctionType(ir.LiteralStructType([I32,ir.IntType(1)]),[I32,I32])
@@ -61,6 +66,12 @@ class Compiler:
         for scope in reversed(self.scopes):
             if name in scope:return scope[name]
         raise CompileError('Unknown variable: '+name)
+    def cleanup(self,scopes):
+        for scope in reversed(scopes):
+            for slot,_ in reversed(list(scope.values())):
+                if slot.type.pointee == BOX:
+                    self.builder.call(self.box_drop,[self.builder.load(slot)])
+                    self.builder.store(ir.Constant(BOX,None),slot)
     def string_constant(self,text):
         data=text.encode('utf-8')+b'\x00'
         typ=ir.ArrayType(ir.IntType(8),len(data))
@@ -111,8 +122,17 @@ class Compiler:
             for index,element in enumerate(e.elements): result=b.insert_value(result,self.value(element),index)
             return result
         if isinstance(e,Index): return b.load(self.index_pointer(e))
-        if isinstance(e,Name): return b.load(self.lookup(e.name)[0])
+        if isinstance(e,Name):
+            slot=self.lookup(e.name)[0]
+            value=b.load(slot)
+            if e.typ=='BoxInt': b.store(ir.Constant(BOX,None),slot)
+            return value
         if isinstance(e,Call):
+            if e.name=='box': return b.call(self.box_new,[self.value(e.args[0])])
+            if e.name=='read_box': return b.call(self.box_get,[b.load(self.lookup(e.args[0].name)[0])])
+            if e.name=='write_box':
+                value=self.value(e.args[1])
+                return b.call(self.box_set,[b.load(self.lookup(e.args[0].name)[0]),value])
             if e.name=='len':
                 value=self.value(e.args[0])
                 return ir.Constant(I32,e.args[0].typ.size) if isinstance(e.args[0].typ,ArrayType) else b.call(self.strlen,[value])
@@ -160,19 +180,29 @@ class Compiler:
             if isinstance(s,Decl):
                 v=self.value(s.value)
                 slot=self.allocations.alloca(v.type,name=s.name)
+                if v.type==BOX: self.allocations.store(ir.Constant(BOX,None),slot)
                 b.store(v,slot); self.scopes[-1][s.name]=(slot,s.mutable)
             elif isinstance(s,Assign):
                 slot,_=self.lookup(s.name)
-                b.store(self.value(s.value),slot)
+                value=self.value(s.value)
+                if s.value.typ=='BoxInt': b.call(self.box_drop,[b.load(slot)])
+                b.store(value,slot)
             elif isinstance(s,FieldAssign):
                 pointer=self.field_pointer(s.target)
                 b.store(self.value(s.value),pointer)
             elif isinstance(s,IndexAssign):
                 pointer=self.index_pointer(s.target)
                 b.store(self.value(s.value),pointer)
-            elif isinstance(s,ExprStmt): self.value(s.value)
-            elif isinstance(s,Transfer): b.branch(self.loops[-1][0 if s.kind=='continue' else 1])
-            elif isinstance(s,Return): b.ret(self.value(s.value))
+            elif isinstance(s,ExprStmt):
+                value=self.value(s.value)
+                if s.value.typ=='BoxInt': b.call(self.box_drop,[value])
+            elif isinstance(s,Transfer):
+                self.cleanup(self.scopes[self.loops[-1][2]:])
+                b.branch(self.loops[-1][0 if s.kind=='continue' else 1])
+            elif isinstance(s,Return):
+                value=self.value(s.value)
+                self.cleanup(self.scopes)
+                b.ret(value)
             elif isinstance(s,Print):
                 v=self.value(s.value)
                 if s.value.typ=='bool': v=b.select(v,self.string_constant('true'),self.string_constant('false'))
@@ -191,9 +221,10 @@ class Compiler:
                 f=b.function; cond_block=f.append_basic_block('while.cond'); body=f.append_basic_block('while.body'); end=f.append_basic_block('while.end')
                 b.branch(cond_block); b.position_at_end(cond_block)
                 test=self.value(s.condition); b.cbranch(test,body,end)
-                b.position_at_end(body); self.loops.append((cond_block,end)); self.statements(s.body); self.loops.pop()
+                b.position_at_end(body); self.loops.append((cond_block,end,len(self.scopes))); self.statements(s.body); self.loops.pop()
                 if not b.block.is_terminated:b.branch(cond_block)
                 b.position_at_end(end)
             else: raise TypeError('Unknown statement node: '+type(s).__name__)
+        if not self.builder.block.is_terminated: self.cleanup([self.scopes[-1]])
         self.scopes.pop()
 
