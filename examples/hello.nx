@@ -1,0 +1,7 @@
+// NOVA-X native hello world
+@optimize(speed)
+fn main() -> int {
+    let result: int = 6 * 7;
+    print(result);
+    return 0;
+}

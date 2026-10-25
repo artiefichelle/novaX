@@ -1,0 +1,22 @@
+/* NOVA-X 0.2: loop control, else-if, calls, and short-circuit logic. */
+fn greet() -> int {
+    print(42);
+    return 1;
+}
+
+fn main() -> int {
+    var i = 0;
+    while true {
+        i = i + 1;
+        if i == 2 {
+            continue;
+        } else if i > 4 {
+            break;
+        }
+        print(i);
+    }
+    let skipped = false && greet();
+    let also_skipped = true || greet();
+    greet();
+    return 0;
+}
