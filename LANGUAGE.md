@@ -1,4 +1,4 @@
-# Implemented language — NOVA-X 0.11
+# Implemented language — NOVA-X 0.12
 
 This document specifies implemented behavior, not planned features.
 
@@ -229,3 +229,24 @@ output is written, the compiler rejects paths equal to any source dependency.
 Imports are ordinary local file reads, not a sandbox. Paths may use `..`; no
 project-root confinement is claimed. Limits are 128 files, depth 32 and 4 MiB
 combined UTF-8 source, alongside the existing per-file limits.
+
+## Version 0.12 ownership update
+
+`BoxInt`, `box`, `read_box` and `write_box` now implement restricted unique heap ownership, moves and automatic drops. General references, owned aggregate fields and lifetime checking remain unfinished. `OWNERSHIP_DESIGN.md` defines the implemented subset and its conservative control-flow restrictions.
+
+```nova
+fn relay(x: BoxInt) -> BoxInt { return x; }
+fn main() -> int {
+    let a = box(10);
+    var b = relay(a); // a is moved and cannot be read again
+    write_box(b, read_box(b) + 2);
+    print(read_box(b)); // 12
+    return 0; // b drops automatically
+}
+```
+
+`box(int) -> BoxInt`, `read_box(named_owner) -> int`, and
+`write_box(mutable_named_owner, int) -> int` are reserved builtins. BoxInt can
+annotate locals, parameters and return types. It has move semantics; primitive
+and aggregate values retain copy semantics. See `OWNERSHIP_DESIGN.md` for exit
+cleanup, branch joins, loop restrictions, allocation failure and unsupported uses.

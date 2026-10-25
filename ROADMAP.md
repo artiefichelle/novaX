@@ -1,7 +1,7 @@
 # Toward a NOVA-X systems language
 
 The user's intended direction is a systems language similar in purpose to C++
-or Rust. A version number does not establish completeness. Version 0.11 is a
+or Rust. A version number does not establish completeness. Version 0.12 is a
 foundation with three primitive types, integer arrays and nested structs, static text, native code generation, and checked
 integer operations. The following capabilities are not implemented.
 
@@ -12,8 +12,8 @@ integer operations. The following capabilities are not implemented.
    conversions, literals, overflow policy, and layout rules.
 3. Extend the by-value aggregate model with array-valued fields, enums, slices,
    additional element types, and a separately specified reference model.
-4. Choose an explicit ownership/lifetime model before adding mutable references,
-   pointers, allocation, deallocation, and FFI. Do not claim Rust-like safety
+4. Extend the selected unique ownership model beyond BoxInt to general owned types,
+   checked references, lifetimes and FFI. Do not claim Rust-like safety
    without enforcement and adversarial validation.
 5. Extend file modules with package/dependency policy, separate compilation,
    reproducible builds, and an explicit field-visibility design.
@@ -97,3 +97,7 @@ Freeze a written feature specification first. Implement and test every promised
 feature on every declared supported target, publish known limitations, and verify
 clean installation, reproducible builds, documentation examples, error behavior,
 and version migration. Do not label the language complete before that work is done.
+
+## Completed in 0.12
+
+`BoxInt`, `box`, `read_box` and `write_box` now implement restricted unique heap ownership, moves and automatic drops. General references, owned aggregate fields and lifetime checking remain unfinished. `OWNERSHIP_DESIGN.md` defines the implemented subset and its conservative control-flow restrictions.

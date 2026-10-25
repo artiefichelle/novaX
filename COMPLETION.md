@@ -1,13 +1,13 @@
 # What remains before a complete systems-language release
 
-NOVA-X is still experimental. Version 0.11 is not a completed C++/Rust alternative.
+NOVA-X is still experimental. Version 0.12 is not a completed C++/Rust alternative.
 This is a status checklist, not a claim that every feature below is implemented.
 
 | Area | Current state | Remaining work |
 | --- | --- | --- |
 | Primitive types | int32, bool, static UTF-8 str | More integer widths, floats, characters, conversion/layout rules |
 | Aggregates | Fixed int arrays, nested structs, value calls/returns | Array fields, more element types, enums, slices |
-| Memory | Stack/value copies and static text | Owned heap values, moves, drops, lifetimes and checked borrows |
+| Memory | Stack/value copies, static text, unique BoxInt heap owners with moves/drops | General owned values, references, lifetimes and checked borrows |
 | Modules | Relative files, aliases, public names, qualified types/calls | Packages, separate compilation, field visibility, reproducible builds |
 | Standard library | print, len, Boolean conversions | Console input, file I/O, owned text, collections, process/environment APIs |
 | Error handling | Compile diagnostics and terminating runtime checks | A language-level recoverable error model |
@@ -18,7 +18,7 @@ This is a status checklist, not a claim that every feature below is implemented.
 ## Next work order
 
 1. Stabilize module rules and add automated CI for the declared target set.
-2. Specify owned heap values and an explicit control-flow analysis representation.
+2. Extend BoxInt ownership to general owned values with explicit control-flow dataflow analysis.
 3. Implement and test moves/drops before adding source references.
 4. Build strings, I/O and collections on that memory/error model.
 5. Expand primitive/aggregate types and validate all promised features and targets.
@@ -27,3 +27,7 @@ The user has selected checked ownership with automatic reclamation; see
 `OWNERSHIP_DESIGN.md`. This choice constrains future implementation, but does not
 turn today's value-copy rules into a borrow checker. A 1.0 label must wait for
 an agreed feature scope and verified acceptance criteria.
+
+## Version 0.12 ownership update
+
+`BoxInt`, `box`, `read_box` and `write_box` now implement restricted unique heap ownership, moves and automatic drops. General references, owned aggregate fields and lifetime checking remain unfinished. `OWNERSHIP_DESIGN.md` defines the implemented subset and its conservative control-flow restrictions.

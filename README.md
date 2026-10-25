@@ -1,13 +1,13 @@
-# NOVA-X 0.11 — experimental systems-language compiler
+# NOVA-X 0.12 — experimental systems-language compiler
 
 NOVA-X compiles a small typed language to LLVM IR and native executables via
-Clang. The goal is a systems language; version 0.11 is a tested foundation,
+Clang. The goal is a systems language; version 0.12 is a tested foundation,
 not a complete replacement for C++ or Rust. See `ROADMAP.md` for unfinished work
 and `LANGUAGE.md` for the implemented language rules.
 
 ## Quick start
 
-Clone this repository, or extract `nova-x-compiler-v0.11.zip` and enter `nova-x`.
+Clone this repository, or extract `nova-x-compiler-v0.12.zip` and enter `nova-x`.
 Requirements: Python 3.10+, the dependency in `requirements.txt`, and Clang with
 a C11-capable system toolchain. Native validation was performed on macOS ARM64;
 other targets have not yet been validated.
@@ -49,7 +49,7 @@ fn main() -> int {
 }
 ```
 
-## New in 0.11 — multi-file modules
+## Added in 0.11 — multi-file modules
 
 ```text
 import "module_geometry.nx" as geometry;
@@ -80,7 +80,7 @@ Expected output: `10`, `15` on separate lines. Imported libraries deliberately
 have no `main`; compile the entry file, not the library file.
 
 The selected long-term memory model is automatic reclamation with checked
-ownership/lifetimes, similar in intent to Rust. It is **not implemented** yet.
+ownership/lifetimes, similar in intent to Rust. The initial BoxInt ownership subset is implemented in 0.12; general lifetime checking remains unfinished.
 See `OWNERSHIP_DESIGN.md` and `COMPLETION.md` for design and remaining work.
 
 ## Added in 0.10 — nested struct values
@@ -244,8 +244,7 @@ Tests cover arithmetic boundaries and runtime failures at `-O0` and `-O3`,
 short-circuit behavior, type errors, text, nested loops, symbol isolation,
 stack-slot placement, and CLI file preservation. Run the suite locally.
 
-Strings refer to immutable static data; no heap allocation or ownership model
-exists yet. Slices, pointers, references, file I/O, a package
+Strings refer to immutable static data; BoxInt provides restricted unique heap ownership. Slices, pointers, references, file I/O, a package
 manager, debugger integration, and a formal memory-safety model remain future
 work. Text concatenation and input are not implemented. This compiler is
 experimental and should only compile trusted programs.
@@ -253,3 +252,19 @@ experimental and should only compile trusted programs.
 `@optimize(speed)` and `--opt-report` expose deterministic optimization only.
 The compiler makes no AI/network calls and claims no speed advantage over
 C++ or Rust. `AI_PLUGIN_SPEC.md` is a proposed extension, not a working feature.
+
+## New in 0.12: unique heap integers
+
+119 tests pass, including native ownership checks at O0/O3 with AddressSanitizer
+and allocation accounting.
+
+`BoxInt` owns one allocated i32. `box(42)` allocates, `read_box(owner)` reads,
+and `write_box(owner, value)` updates a mutable owner. Assignment, function
+arguments and returns move ownership. The compiler rejects later use of a moved
+binding. Scope exit, overwrite, return, break and continue automatically drop
+remaining owners. Try `examples/ownership.nx`.
+
+This is a restricted ownership foundation. There are no source references,
+heap-owning struct fields or general lifetime/alias analysis. Moves from outer
+bindings inside loops are rejected; branch joins conservatively require ownership
+on both paths. See `OWNERSHIP_DESIGN.md` for precise restrictions.

@@ -1,4 +1,4 @@
-# NOVA-X 0.11 compiler architecture and policy
+# NOVA-X 0.12 compiler architecture and policy
 
 ## Pipeline
 
@@ -49,9 +49,9 @@ per function invocation. Local `int[N]` arrays use `[N x i32]` stack storage and
 They may be passed and returned by value, without exposed references.
 Structs lower to module-local named LLVM aggregate types with primitive or nested struct fields;
 they also use value semantics. This calling convention is internal and unstable.
-Recursive calls consume additional stack. Heap objects,
-mutable references, pointers exposed to source code, ownership, borrowing, and
-FFI remain unimplemented. No Rust-equivalent memory-safety claim is made.
+Recursive calls consume additional stack. BoxInt lowers to an owned i32 pointer,
+with checked moves and generated scope drops. General heap aggregates, mutable
+references, source pointers, lifetime analysis and FFI remain unimplemented. No Rust-equivalent memory-safety claim is made.
 Before implementing those features, their aliasing, lifetime and destruction
 rules must be specified and enforced in a semantic pass.
 
@@ -86,3 +86,7 @@ reference against unmodified declarations, then qualifies names and merges typed
 syntax for semantic analysis. Imported qualified symbols use a length-prefixed
 LLVM name scheme separate from root `nx_user_` symbols. There is still one linked
 LLVM module and runtime, not separate compilation or a stable library ABI.
+
+## Version 0.12 ownership update
+
+`BoxInt`, `box`, `read_box` and `write_box` now implement restricted unique heap ownership, moves and automatic drops. General references, owned aggregate fields and lifetime checking remain unfinished. `OWNERSHIP_DESIGN.md` defines the implemented subset and its conservative control-flow restrictions.

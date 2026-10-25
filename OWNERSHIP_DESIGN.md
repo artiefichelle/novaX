@@ -1,35 +1,46 @@
-# Ownership direction — selected, not implemented
+# Ownership in NOVA-X 0.12
 
-The user selected automatic memory reclamation with checked ownership/lifetimes,
-similar in intent to Rust. This document records the direction. NOVA-X 0.11 does
-not implement a borrow checker, owned heap objects, destructors or source references.
-Current values are primitives, static string pointers and copied fixed aggregates.
+The chosen direction is automatic reclamation with checked ownership, similar
+in intent to Rust. Version 0.12 implements a restricted unique owner, not a
+general borrow checker or Rust-equivalent safety guarantee.
 
-## Required semantics before heap/reference syntax is accepted
+## Implemented subset
 
-- Each owned allocation has one owner. Leaving its scope drops it automatically.
-- Moving an owned value invalidates the source binding; later use must be rejected.
-- Primitive values remain copyable. An aggregate is copyable only if every field
-  is copyable. Existing static `str` remains distinct from any future owned string.
-- Shared borrows permit reading. An exclusive mutable borrow excludes simultaneous
-  access through the owner or other borrows while live.
-- References may not outlive the allocation they refer to. Returning a reference
-  to a local, storing a short-lived reference into a longer-lived object, or using
-  a reference after its owner is moved/dropped must be rejected.
-- Drop order, branch joins, loop-carried moves, partially moved aggregates and
-  error exits must be specified before code generation is implemented.
-- External/native calls require a separate boundary policy; no unchecked FFI is
-  implied by the internal LLVM calling convention.
+- `BoxInt` uniquely owns one heap-allocated signed i32; `box(int)` creates it.
+- `read_box(name)` reads without moving. `write_box(name, int)` requires a mutable
+  named owner and returns the stored integer. Neither operation produces an
+  escaping reference. The write value cannot move the owner being accessed.
+- Binding initialization, assignment, argument passing and returns move BoxInt.
+  A moved binding cannot be read or moved again. A mutable binding can be
+  reinitialized. `owner = owner` is valid and preserves its allocation.
+- Owners drop in reverse declaration order at normal scope exit. Return drops
+  active owners after evaluating the result; break/continue drop exited loop
+  scopes. Assignment evaluates its RHS before dropping the old owner. Discarded
+  owned expression results are dropped. Function parameters are owners too.
+- Generated owner slots become null on moves; null drops are harmless.
+- Branch analysis checks each branch from the same initial state, then requires
+  availability on both paths, conservatively even if one path returns.
+- Moving an outer owner inside a loop, including its condition, is rejected.
+  Loop-local owners can move. Initialization inside a loop is not definite after
+  the loop because it might execute zero times.
+- BoxInt cannot be printed or compared directly or stored in arrays/structs.
+  Primitives, static strings and existing aggregates retain copy semantics.
+- Allocation failure and invalid internal pointers terminate with a diagnostic.
+  Runtime errors terminate the process without unwinding owners; the operating
+  system reclaims process memory. No exceptions or user destructors exist.
 
-## Implementation stages
+## Still required
 
-1. Specify an owned type and its operations, including allocation failure and drop.
-2. Introduce a control-flow IR with binding identities, moves, borrows and drop points.
-3. Perform definite-initialization and use-after-move analysis over every CFG path.
-4. Define reference regions/lifetimes and enforce aliasing and escape constraints.
-5. Lower validated ownership operations to allocation/drop code.
-6. Add positive and compile-fail tests for all rules, including branches, loops,
-   early returns, nested fields and modules; add memory/runtime tooling checks.
+General owned types and aggregate moves, source shared/exclusive references,
+lifetime/escape checks, a control-flow dataflow analysis permitting safe
+loop-carried ownership, destructors and a defined native FFI boundary.
+No tracing garbage collector is introduced.
 
-Do not publish a Rust-equivalent memory-safety claim before these rules exist and
-are enforced. Automatic garbage collection is not the selected ownership design.
+## Validation
+
+Compile-fail tests cover use after move, duplicate arguments, invalid mutations,
+branch joins, loop moves, zero-iteration initialization and write-value moves.
+Native tests run at O0/O3. An instrumented runtime counts live allocations across
+normal exits, early returns, overwritten values, moved parameters, discarded
+results, break and continue; AddressSanitizer additionally checks those runs.
+Validation currently covers macOS ARM64 only.
