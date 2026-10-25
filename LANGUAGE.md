@@ -1,4 +1,4 @@
-# Implemented language — NOVA-X 0.7
+# Implemented language — NOVA-X 0.8
 
 This document specifies implemented behavior, not planned features.
 
@@ -145,3 +145,12 @@ arrays, and element compound assignment are also not implemented.
 LLVM storage is `[N x i32]` on the function stack. The per-array size limit does
 not cap total stack use: many large locals and recursion can still exhaust the
 host stack. Arrays introduce no ownership or borrowing model.
+
+## Interval optimization
+
+Version 0.8 does not change source semantics. At `-O2` and `-O3`, a conservative
+range pass may replace remainder by a positive constant with one conditional
+subtraction when successful evaluation proves `0 <= dividend < 2*divisor`.
+Intermediate operand evaluation, arithmetic failures and array bounds remain
+observable. Unsupported range/control-flow patterns fall back to existing code.
+`--no-range-opt` disables the pass; `--opt-report` reports its reduction count.

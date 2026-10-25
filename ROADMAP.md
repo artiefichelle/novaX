@@ -1,7 +1,7 @@
 # Toward a NOVA-X systems language
 
 The user's intended direction is a systems language similar in purpose to C++
-or Rust. A version number does not establish completeness. Version 0.7 is a
+or Rust. A version number does not establish completeness. Version 0.8 is a
 foundation with three primitive types, local integer arrays, static text, native code generation, and checked
 integer operations. The following capabilities are not implemented.
 
@@ -18,6 +18,15 @@ integer operations. The following capabilities are not implemented.
 5. Define modules, visibility, imports, dependencies, and reproducible builds.
 6. Define error handling and the standard library: text, I/O, files, collections,
    command-line arguments, and process/environment access.
+
+## Completed in 0.8
+
+- [x] Conservative interval facts and a semantics-preserving modulo reduction
+  for nonnegative bounded operands, including simple-loop invariants.
+- [x] Differential checks against the disabled pass and seeded reference programs,
+  plus signed-boundary interval tests and preservation of runtime errors.
+- [x] Reproducible interleaved benchmark vs 0.7 and C, including a manually tuned
+  C comparison and raw samples. Broader benchmarks remain unfinished.
 
 ## Completed in 0.7
 

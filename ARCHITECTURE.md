@@ -1,4 +1,4 @@
-# NOVA-X 0.7 compiler architecture and policy
+# NOVA-X 0.8 compiler architecture and policy
 
 ## Pipeline
 
@@ -12,8 +12,12 @@
    expression with `int`, `bool`, `str`, or a fixed-size local `ArrayType`. Invalid programs stop here.
 5. `frontend.optimize_program(program)` folds valid, non-overflowing integer
    arithmetic and retains the original expression span and inferred type.
-6. `backend.Compiler(program)` lowers analyzed nodes into LLVM IR.
-7. LLVM verifies the module. `--check` stops without writing files; `--emit-llvm`
+6. At `-O2` / `-O3`, `ranges.RangeAnalysis` computes conservative intervals.
+   Straight-line loops use widening to an invariant and bounded narrowing;
+   complex loops use unknown facts. Bottom represents no successful result.
+7. `backend.Compiler(program, facts)` lowers nodes, applying proven modulo
+   reductions without dropping intermediate arithmetic or array checks.
+8. LLVM verifies the module. `--check` stops without writing files; `--emit-llvm`
    writes IR. Native compilation links the IR with `src/runtime.c` through Clang.
 
 `analyze_source(text, filename)` is the convenient front-end-only API. The AST

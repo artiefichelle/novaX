@@ -1,13 +1,13 @@
-# NOVA-X 0.7 — experimental systems-language compiler
+# NOVA-X 0.8 — experimental systems-language compiler
 
 NOVA-X compiles a small typed language to LLVM IR and native executables via
-Clang. The goal is a systems language; version 0.7 is a tested foundation,
+Clang. The goal is a systems language; version 0.8 is a tested foundation,
 not a complete replacement for C++ or Rust. See `ROADMAP.md` for unfinished work
 and `LANGUAGE.md` for the implemented language rules.
 
 ## Quick start
 
-Clone this repository, or extract `nova-x-compiler-v0.7.zip` and enter `nova-x`.
+Clone this repository, or extract `nova-x-compiler-v0.8.zip` and enter `nova-x`.
 Requirements: Python 3.10+, the dependency in `requirements.txt`, and Clang with
 a C11-capable system toolchain. Native validation was performed on macOS ARM64;
 other targets have not yet been validated.
@@ -23,7 +23,7 @@ python src/novax.py examples/systems.nx -o systems
 python -m unittest discover -s tests -v
 ```
 
-`src/frontend.py`, `src/backend.py`, and `src/runtime.c` must stay beside `src/novax.py`. Native builds compile both the
+`src/frontend.py`, `src/backend.py`, `src/ranges.py`, and `src/runtime.c` must stay beside `src/novax.py`. Native builds compile both the
 LLVM module and this runtime. `--emit-llvm -o program.ll` writes verified IR;
 link that IR with `src/runtime.c` to build an executable manually.
 
@@ -49,7 +49,27 @@ fn main() -> int {
 }
 ```
 
-## New in 0.7 — local fixed-size integer arrays
+## New in 0.8 — interval-proven remainder optimization
+
+NOVA-X 0.8 is **3.57x faster than 0.7 on the unchanged checksum benchmark**:
+57.38 ms becomes 16.06 ms for 20 million iterations on the tested Apple M4.
+This is a workload-specific result; no general C/Rust performance advantage is claimed.
+See `BENCHMARKS.md` and the reproducible `benchmark-nova-x-v0.8.zip` bundle.
+
+- Conservative interval analysis tracks successful checked integer results,
+  local array element ranges, and invariants in straight-line while bodies.
+- For a positive constant `m` and proven `0 <= x < 2*m`, `x % m` becomes a
+  comparison/select/subtraction. Operands and their side effects still evaluate.
+- Intermediate arithmetic overflow and array bounds checks remain active.
+- Unknown or unsupported cases keep the previous code generation. There is no
+  new source syntax and no relaxed arithmetic or memory policy.
+- Enabled at `-O2` / `-O3`; use `--no-range-opt` to disable it. `--opt-report`
+  reports the number of `modulo_reductions`.
+- 78 tests include signed arithmetic boundary facts, loop mutation/shadowing,
+  complex-loop fallbacks, errors and side effects, plus seeded modular programs
+  checked against a reference with the pass enabled and disabled.
+
+## Added in 0.7 — local fixed-size integer arrays
 
 ```text
 var values: int[3] = [10, 20, 30];

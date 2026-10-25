@@ -1,58 +1,54 @@
-# NOVA-X 0.7 performance measurement
+# NOVA-X 0.8 speed comparison
 
-Measured on 2026-10-25, Apple M4, macOS 26.6.2 ARM64, Apple Clang 21.0.0,
-Python 3.14.8, llvmlite 0.48.0. This report measures one workload only.
+Measured 2026-10-25 on Apple M4 / macOS 26.6.2 ARM64, Apple Clang 21.0.0,
+Python 3.14.8, llvmlite 0.48.0. This is the same 20,000,000-iteration checked
+integer-array checksum workload used for 0.7, with unchanged NOVA-X source.
 
-## Workload and method
+Eleven runs per variant were interleaved in a seeded randomized order after one
+warmup per executable. Every run returned checksum 999433. Times include process
+launch and output capture; load, thermals and frequency were not controlled.
 
-20,000,000 iterations read an eight-element integer array, accumulate a checksum,
-and take a remainder. NOVA-X uses checked addition and checked array accesses.
-The C reference explicitly checks addition overflow and array bounds, with the
-same input, output, signed integer widths, and loop structure. Divisors are
-constant positive values, so division-by-zero and signed division overflow are
-impossible in this particular workload.
+| Variant | Median | Min–max |
+| --- | ---: | ---: |
+| NOVA-X 0.7 -O3 | 57.38 ms | 57.05–72.33 ms |
+| NOVA-X 0.8 disabled -O3 | 57.45 ms | 57.05–57.79 ms |
+| NOVA-X 0.8 -O3 | 16.06 ms | 15.58–16.34 ms |
+| C reference -O3 | 57.50 ms | 56.82–58.30 ms |
+| C manually reduced -O3 | 15.82 ms | 15.49–16.10 ms |
 
-Each executable was run once to warm it up and then seven times. Reported runtime
-is the median wall time for the whole process, including process launch and
-output capture. Variants ran sequentially, not interleaved. Load, thermal state,
-and frequency were not controlled. Every measured run returned checksum 999433.
-This is a bounded comparison, not a statistical equivalence study or a general
-language benchmark.
+The 0.8 optimization is **3.57x faster** than 0.7 for this workload
+(about 72% less runtime). Disabling it in 0.8 restores the baseline
+performance, isolating the effect of the new pass. The single-run compile timings
+and every raw sample are included in the JSON; compile speed is not the claim.
 
-| Variant | Median runtime | Min–max | Single compile invocation |
-| --- | ---: | ---: | ---: |
-| NOVA-X -O0 | 67.35 ms | 64.36–68.91 ms | 124.22 ms |
-| NOVA-X -O3 | 57.84 ms | 57.52–59.90 ms | 110.90 ms |
-| C -O0 | 129.03 ms | 128.66–130.04 ms | 41.34 ms |
-| C -O3 | 57.82 ms | 57.48–59.54 ms | 42.40 ms |
+## What changed
 
-At `-O3`, NOVA-X and the C reference both took approximately 58 ms here; the
-observed difference is much smaller than the variation across samples. There
-is no evidence of a NOVA-X speed advantage in the optimized comparison.
+Interval analysis proves that the checksum before `% 1000003` is nonnegative
+and less than twice the divisor. In that case, remainder can be computed by a
+comparison and at most one subtraction. The compiler applies this transformation
+at `-O2` / `-O3` without changing the NOVA-X source. It still evaluates operands,
+checks intermediate arithmetic overflow, and checks array bounds. Unknown ranges,
+negative operands, unsafe divisors and complex loops conservatively retain the
+existing operation. `--no-range-opt` disables the pass for comparison.
 
-The unoptimized C variant calls a separate overflow-check helper, while NOVA-X
-emits inline LLVM overflow intrinsics. Its slower `-O0` result is specific to
-this implementation and should not be used to rank the languages.
-
-Compilation was measured only once per variant. NOVA-X compilation includes
-Python startup, frontend/LLVM work, Clang, and compiling/linking its C runtime;
-the C measurement invokes Clang on one source file. These are end-to-end build
-measurements, not isolated frontend timings.
+The C reference has equivalent explicit overflow and index checks. A manually
+reduced C implementation is included: it reaches approximately the same speed
+as optimized NOVA-X. This demonstrates an automatic optimization for a particular
+pattern, not a general advantage over C or Rust. Programs without this pattern
+may receive no speedup. The baseline has one visible outlier; all samples remain
+in the report and the comparison uses medians.
 
 ## Reproduce
 
-Download and extract `benchmark-nova-x-v0.7.zip`. Use the Python virtual environment
-with NOVA-X's requirements installed and a Clang toolchain on PATH:
+Download `benchmark-nova-x-v0.8.zip`, extract it, and activate a Python environment
+with NOVA-X's requirements. Have Clang on PATH and extract both language releases:
 
 ```bash
-python run.py --compiler /path/to/nova-x/src/novax.py
+python run.py --baseline /path/to/v0.7/nova-x/src/novax.py --candidate /path/to/v0.8/nova-x/src/novax.py
 ```
 
-The script rebuilds four executables next to itself, checks all outputs, prints
-the samples, and writes `results.json`. Its CPU metadata command currently uses
-macOS `sysctl`; port that line before running the script on another OS.
-
-The bundle contains `checksum.nx`, `checksum.c`, `run.py`, raw `results.json`, and
-this report. More workloads (calls, recursion, branches, memory access patterns,
-text operations, larger programs) are needed before broader conclusions.
-No speedup over C++ or Rust is established by this measurement.
+The script builds both NOVA-X versions, 0.8 with the pass disabled, the original
+C reference and the manually reduced C variant. It validates output, records
+samples, and writes `results.json`. CPU metadata currently uses macOS `sysctl`.
+The bundle includes both C sources, unchanged NOVA-X source, runner, raw results,
+and this report. The earlier test remains in `benchmark-nova-x-v0.7.zip`.
