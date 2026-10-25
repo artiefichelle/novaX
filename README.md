@@ -1,13 +1,13 @@
-# NOVA-X 0.13 — experimental systems-language compiler
+# NOVA-X 0.14 — experimental systems-language compiler
 
 NOVA-X compiles a small typed language to LLVM IR and native executables via
-Clang. The goal is a systems language; version 0.13 is a tested foundation,
+Clang. The goal is a systems language; version 0.14 is a tested foundation,
 not a complete replacement for C++ or Rust. See `ROADMAP.md` for unfinished work
 and `LANGUAGE.md` for the implemented language rules.
 
 ## Quick start
 
-Clone this repository, or extract `nova-x-compiler-v0.13.zip` and enter `nova-x`.
+Clone this repository, or extract `nova-x-compiler-v0.14.zip` and enter `nova-x`.
 Requirements: Python 3.10+, the dependency in `requirements.txt`, and Clang with
 a C11-capable system toolchain. Native validation was performed on macOS ARM64;
 other targets have not yet been validated.
@@ -48,6 +48,31 @@ fn main() -> int {
     return 0;
 }
 ```
+
+## New in 0.14: integer console input
+
+`read_int() -> int` reads a signed decimal i32 from standard input. Whitespace
+separates values. EOF, malformed tokens and out-of-range numbers produce runtime
+errors. `try_read_int(mutable_owner) -> bool` instead returns false at EOF and
+leaves the BoxInt value unchanged; malformed or out-of-range input still errors.
+The owner stays available and is automatically freed as usual.
+
+```nova
+var value = box(0);
+while try_read_int(value) {
+    print(read_box(value));
+}
+```
+
+The runtime flushes stdout before waiting for input so prompts are visible.
+Try `printf '1 2 -3 9\n' | ./input_sum` after compiling
+`examples/input_sum.nx`; it prints a prompt and `9`. Interactive input may block
+until the terminal supplies a token or EOF. `--check` never reads input.
+
+149 tests cover language regressions and the new input rules. Native input tests
+run at O0/O3; boundary streaming also runs with AddressSanitizer and UBSan.
+Only macOS ARM64 has been validated. Text/file input and recoverable parse errors
+remain future work.
 
 ## New in 0.13: ownership across control flow
 
@@ -260,7 +285,7 @@ stack-slot placement, and CLI file preservation. Run the suite locally.
 
 Strings refer to immutable static data; BoxInt provides restricted unique heap ownership. Slices, pointers, references, file I/O, a package
 manager, debugger integration, and a formal memory-safety model remain future
-work. Text concatenation and input are not implemented. This compiler is
+work. Text concatenation and text input are not implemented; decimal integer console input is available. This compiler is
 experimental and should only compile trusted programs.
 
 `@optimize(speed)` and `--opt-report` expose deterministic optimization only.

@@ -1,4 +1,4 @@
-# NOVA-X 0.13 compiler architecture and policy
+# NOVA-X 0.14 compiler architecture and policy
 
 ## Pipeline
 
@@ -100,3 +100,13 @@ at the nearest loop exit; return states exit the function. Loop conditions still
 cannot move outer owners. Zero-iteration exits remain conservatively possible.
 See `OWNERSHIP_DESIGN.md` for the invariant and `examples/ownership_flow.nx`
 for an executable example. General references and lifetime checking remain open.
+
+## Console input runtime (0.14)
+
+The frontend validates `read_int` and the non-moving mutable-owner operation
+`try_read_int`. LLVM calls runtime functions with i32 results; the latter is
+explicitly converted to an LLVM bool, avoiding a dependency on the C bool ABI.
+The C runtime streams ASCII decimal tokens through a checked uint32 accumulator,
+without dynamic token allocation. INT32_MIN is handled explicitly before signed
+conversion. Output is assigned only after complete successful parsing, preserving
+the prior boxed value at EOF. Both builtins flush stdout before reading.

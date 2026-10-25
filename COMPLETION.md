@@ -1,6 +1,6 @@
 # What remains before a complete systems-language release
 
-NOVA-X is still experimental. Version 0.13 is not a completed C++/Rust alternative.
+NOVA-X is still experimental. Version 0.14 is not a completed C++/Rust alternative.
 This is a status checklist, not a claim that every feature below is implemented.
 
 | Area | Current state | Remaining work |
@@ -9,7 +9,7 @@ This is a status checklist, not a claim that every feature below is implemented.
 | Aggregates | Fixed int arrays, nested structs, value calls/returns | Array fields, more element types, enums, slices |
 | Memory | Stack/value copies, static text, unique BoxInt heap owners with moves/drops | General owned values, references, lifetimes and checked borrows |
 | Modules | Relative files, aliases, public names, qualified types/calls | Packages, separate compilation, field visibility, reproducible builds |
-| Standard library | print, len, Boolean conversions | Console input, file I/O, owned text, collections, process/environment APIs |
+| Standard library | print, len, Boolean conversions, checked integer console input | Text/file I/O, owned text, collections, process/environment APIs |
 | Error handling | Compile diagnostics and terminating runtime checks | A language-level recoverable error model |
 | Tooling | Native/LLVM builds, unit/integration and bounded differential tests | CI, platform matrix, coverage-guided fuzzing, formatter, LSP, debug info |
 | Speed | Specific measured optimizations and algorithm examples | Broader reproducible workloads and regression monitoring |
@@ -41,3 +41,8 @@ at the nearest loop exit; return states exit the function. Loop conditions still
 cannot move outer owners. Zero-iteration exits remain conservatively possible.
 See `OWNERSHIP_DESIGN.md` for the invariant and `examples/ownership_flow.nx`
 for an executable example. General references and lifetime checking remain open.
+
+## Version 0.14 input update
+
+Integer console input and EOF-controlled loops are implemented with `read_int`
+and `try_read_int`. Text/file I/O and recoverable parse errors remain unfinished.

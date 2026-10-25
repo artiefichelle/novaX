@@ -1,7 +1,7 @@
 # Toward a NOVA-X systems language
 
 The user's intended direction is a systems language similar in purpose to C++
-or Rust. A version number does not establish completeness. Version 0.13 is a
+or Rust. A version number does not establish completeness. Version 0.14 is a
 foundation with three primitive types, integer arrays and nested structs, static text, native code generation, and checked
 integer operations. The following capabilities are not implemented.
 
@@ -111,3 +111,12 @@ and version migration. Do not label the language complete before that work is do
 
 General references, owned aggregates and a full lifetime/alias analysis remain
 future work. The implemented structured analysis is not a general borrow checker.
+
+## Completed in 0.14
+
+- [x] Decimal integer console input with explicit i32 range checks.
+- [x] EOF-aware input into a mutable BoxInt without ownership transfer.
+- [x] Defined token/whitespace rules and diagnostics for invalid input.
+- [x] Native stdin tests at O0/O3, imported-module calls and sanitizer boundary tests.
+
+Text input, files, owned strings and recoverable errors remain open.

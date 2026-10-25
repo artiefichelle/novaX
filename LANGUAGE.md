@@ -1,4 +1,4 @@
-# Implemented language — NOVA-X 0.13
+# Implemented language — NOVA-X 0.14
 
 This document specifies implemented behavior, not planned features.
 
@@ -260,3 +260,24 @@ at the nearest loop exit; return states exit the function. Loop conditions still
 cannot move outer owners. Zero-iteration exits remain conservatively possible.
 See `OWNERSHIP_DESIGN.md` for the invariant and `examples/ownership_flow.nx`
 for an executable example. General references and lifetime checking remain open.
+
+## Console integer input (0.14)
+
+- `read_int() -> int` requires one integer token from standard input. EOF before
+  a token terminates the process with a runtime error.
+- `try_read_int(owner) -> bool` requires an available, mutable, named BoxInt.
+  Successful input stores the integer and returns true. EOF before a token returns
+  false without changing the stored value. The operation borrows without moving.
+- Tokens follow `[+-]?[0-9]+`, bounded by -2147483648 through 2147483647.
+  Leading zeros and signed zero are allowed. Only ASCII space, tab, LF, CR,
+  vertical tab and form feed delimit tokens; the first trailing delimiter is
+  consumed. EOF immediately after digits completes a valid token.
+- Bare signs, trailing non-digits, Unicode digits, decimal points, separators,
+  embedded NUL and hexadecimal syntax are errors. Over-range values fail before
+  overflowing the host integer accumulator. Invalid input is not recoverable.
+- Stream read errors and failed stdout flushes terminate with a diagnostic.
+  Stdout is flushed before each read. No locale-dependent numeric parsing,
+  dynamic token buffer, text input, file API or asynchronous input is introduced.
+- These builtin names are reserved, work inside imported modules, and are
+  validated during `--check` without reading standard input.
+- Runtime errors retain the existing process-exit policy without owner unwinding.
