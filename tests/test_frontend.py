@@ -108,19 +108,34 @@ class AnalyzerTests(unittest.TestCase):
             self.assertIsNotNone(caught.exception.span)
 
     def test_all_paths_and_unreachable_code(self):
-        for body, diagnostic in [('if 1 {return 0;}', 'may exit'), ('return 0;print(1);', 'Unreachable')]:
+        for body, diagnostic in [('if true {return 0;}', 'may exit'), ('return 0;print(1);', 'Unreachable')]:
             with self.assertRaises(CompileError) as caught:
                 analyze_source('fn main() -> int {' + body + '}')
             self.assertIn(diagnostic, str(caught.exception))
-        analyze_source('fn main() -> int {if 1 {return 0;} else {return 1;}}')
+        analyze_source('fn main() -> int {if true {return 0;} else {return 1;}}')
 
     def test_shadowing(self):
-        analyze_source('fn main() -> int {let n=1;if n {let n="inner";print(n);}return n;}')
+        analyze_source('fn main() -> int {let n=1;if n != 0 {let n="inner";print(n);}return n;}')
 
     def test_minimum_integer_only_under_negation(self):
         analyze_source('fn main() -> int {return -2147483648;}')
         with self.assertRaises(CompileError):
             analyze_source('fn main() -> int {return 2147483648;}')
+
+    def test_boolean_nodes_and_comparison_types(self):
+        program = analyze_source('fn main() -> int {let flag: bool=true;print(1<2);return to_int(flag);}')
+        fn = program.functions[0]
+        self.assertIs(fn.body[0].value.value, True)
+        self.assertEqual(fn.body[0].value.typ, 'bool')
+        self.assertEqual(fn.body[1].value.typ, 'bool')
+        self.assertEqual(fn.body[2].value.typ, 'int')
+        self.assertEqual(fn.body[2].value.args[0].typ, 'bool')
+
+    def test_boolean_arithmetic_rejected_before_optimization(self):
+        for expression in ('true+false', 'true==1', '!1', 'to_int(1)'):
+            with self.subTest(expression=expression):
+                with self.assertRaises(CompileError):
+                    analyze_source('fn main() -> int {print('+expression+');return 0;}')
 
     def test_validate_before_optimization(self):
         for expression in ('2147483648 - 1', 'false && missing()', 'true || "text"'):

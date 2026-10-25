@@ -47,7 +47,7 @@ class LanguageV02Tests(unittest.TestCase):
                 self.assertEqual(exe.stdout,expected)
 
     def test_short_circuit_side_effects(self):
-        self.native('fn noisy() -> int { print(99); return 1; }\nfn main() -> int {\nprint(false && noisy()); print(true || noisy());\nprint(true && noisy()); print(false || noisy());\nprint((false || true) && (true || noisy())); return 0;\n}', '0\n1\n99\n1\n99\n1\n1\n')
+        self.native('fn noisy() -> bool { print(99); return true; }\nfn main() -> int {\nprint(false && noisy()); print(true || noisy());\nprint(true && noisy()); print(false || noisy());\nprint((false || true) && (true || noisy())); return 0;\n}', 'false\ntrue\n99\ntrue\n99\ntrue\ntrue\n')
 
     def test_nested_loops_and_else_if(self):
         self.native('fn main() -> int {\nvar i = 0; var total = 0;\nwhile i < 6 {\ni = i + 1;\nif i == 2 { continue; } else if i == 5 { break; }\nvar j = 0;\nwhile true { j = j + 1; if j == 2 { break; } total = total + i; }\n}\nprint(total); print(i); return 0;\n}', '8\n5\n')
@@ -83,7 +83,7 @@ class StringTests(unittest.TestCase):
     native=LanguageV02Tests.native
 
     def test_string_functions_and_variables(self):
-        self.native('fn choose(n: int, text: str) -> str {\nif n { return text; } else { return "fallback"; }\n}\nfn main() -> int {\nlet message: str = "Hallo NOVA-X";\nvar selected = choose(1, message);\nprint(selected); selected = choose(0, message); print(selected);\nprint(42); return 0;\n}', 'Hallo NOVA-X\nfallback\n42\n')
+        self.native('fn choose(n: bool, text: str) -> str {\nif n { return text; } else { return "fallback"; }\n}\nfn main() -> int {\nlet message: str = "Hallo NOVA-X";\nvar selected = choose(true, message);\nprint(selected); selected = choose(false, message); print(selected);\nprint(42); return 0;\n}', 'Hallo NOVA-X\nfallback\n42\n')
 
     def test_unicode_escapes_and_format_safety(self):
         self.native('fn main() -> int {\nprint("Grüße 🌍"); print("Zeile 1\\nZeile 2\\t\\"ok\\"");\nprint("100% %s %n"); print(""); print("/* not a comment");\nprint("// not a comment"); print("\\u0041"); return 0;\n}', 'Grüße 🌍\nZeile 1\nZeile 2\t"ok"\n100% %s %n\n\n/* not a comment\n// not a comment\nA\n')
@@ -146,8 +146,8 @@ class SystemsFoundationTests(unittest.TestCase):
                     'print(2147483647); print(-2147483648); return 0; }','-2\n-1\n2147483647\n-2147483648\n')
 
     def test_short_circuit_skips_runtime_error(self):
-        self.native('fn main() -> int {print(false && (1 / 0)); '
-                    'print(true || (2147483647 + 1)); return 0;}','0\n1\n')
+        self.native('fn main() -> int {print(false && (1 / 0 == 0)); '
+                    'print(true || (2147483647 + 1 == 0)); return 0;}','false\ntrue\n')
 
     def test_string_comparison_and_length(self):
         self.native('fn id(s: str) -> str {return s;} fn main() -> int {'
@@ -155,7 +155,7 @@ class SystemsFoundationTests(unittest.TestCase):
                     'print("a" < "b"); print("b" >= "a"); '
                     'print("same" <= "same"); print("b" > "a"); '
                     'print(len("")); print(len("Grüße")); return 0;}',
-                    '1\n1\n1\n1\n1\n1\n0\n7\n')
+                    'true\ntrue\ntrue\ntrue\ntrue\ntrue\n0\n7\n')
 
     def test_compound_assignments(self):
         self.native('fn main() -> int {var x=10; x+=5; x-=3; x*=2; x/=4; x%=4; print(x); return 0;}','2\n')
@@ -189,7 +189,7 @@ class SystemsFoundationTests(unittest.TestCase):
     def test_cli_check_and_version(self):
         version=subprocess.run([sys.executable,str(COMPILER),'--version'],capture_output=True,text=True,timeout=20)
         self.assertEqual(version.returncode,0,version.stderr)
-        self.assertIn('0.5.0',version.stdout)
+        self.assertIn('0.6.0',version.stdout)
         with tempfile.TemporaryDirectory() as d:
             source=Path(d)/'input.nx'; source.write_text('fn main() -> int {return 0;}')
             output=Path(d)/'absent'
@@ -235,6 +235,56 @@ class ArchitectureRegressionTests(unittest.TestCase):
         self.assertIn('test.nx:2:16: error:',p.stderr)
         self.assertIn('^^^^^^',p.stderr)
         self.assertNotIn('Traceback',p.stderr)
+
+class BooleanTests(unittest.TestCase):
+    compile_source=CompilerTests.compile_source
+    native=LanguageV02Tests.native
+
+    def test_boolean_functions_bindings_and_print(self):
+        self.native('fn both(a: bool,b: bool) -> bool {return a && b;} '
+                    'fn main() -> int {let ready: bool = 2<3; var ok=both(ready,true); '
+                    'print(ok); ok=!ok; print(ok); print(ok==false); return 0;}',
+                    'true\nfalse\ntrue\n')
+
+    def test_boolean_short_circuit_and_casts(self):
+        self.native('fn noisy() -> bool {print(99);return true;} fn main() -> int {'
+                    'print(false && noisy()); print(true || noisy());'
+                    'print(to_bool(-7));print(to_bool(0));print(to_int(true));'
+                    'print(to_int(false)); return 0;}', 'false\ntrue\ntrue\nfalse\n1\n0\n')
+
+    def test_boolean_abi_is_i1(self):
+        p,llvm,_=self.compile_source('fn negate(x: bool) -> bool {return !x;} '
+                                     'fn main() -> int {print(negate(false));return 0;}')
+        self.assertEqual(p.returncode,0,p.stderr)
+        self.assertIn('define i1 @"nx_user_negate"(i1',llvm)
+
+    def test_no_implicit_boolean_integer_conversion(self):
+        cases=[
+            'let x: int=true;', 'let x: bool=1;', 'var x=true;x=0;',
+            'print(true+1);', 'print(-true);', 'print(!1);',
+            'print(1 && true);', 'print(false || 0);', 'print(true==1);',
+            'if 1 {print(0);}', 'while 1 {break;}', 'print(true < false);',
+            'print(to_int(1));', 'print(to_bool(true));', 'print(to_bool("x"));',
+            'print(to_bool());', 'print(to_int(true,false));',
+        ]
+        for body in cases:
+            with self.subTest(body=body):
+                p,_,_=self.compile_source('fn main() -> int {'+body+'return 0;}')
+                self.assertNotEqual(p.returncode,0)
+                self.assertIn('test.nx:1:',p.stderr)
+                self.assertNotIn('Traceback',p.stderr)
+
+    def test_boolean_function_type_errors(self):
+        sources=[
+            'fn flag() -> bool {return 1;} fn main() -> int {return 0;}',
+            'fn f(x:bool) -> int {return 0;} fn main() -> int {return f(1);}',
+            'fn main() -> bool {return true;}',
+            'fn to_int(x:bool) -> int {return 0;} fn main() -> int {return 0;}',
+        ]
+        for source in sources:
+            p,_,_=self.compile_source(source)
+            self.assertNotEqual(p.returncode,0)
+            self.assertNotIn('Traceback',p.stderr)
 
 if __name__=='__main__':unittest.main()
 
