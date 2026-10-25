@@ -1,4 +1,4 @@
-# Implemented language — NOVA-X 0.9
+# Implemented language — NOVA-X 0.10
 
 This document specifies implemented behavior, not planned features.
 
@@ -170,13 +170,13 @@ fn shift(p: Point) -> Point {
 Structs are declared at file scope and may be used by functions appearing before
 the declaration. A struct name identifies a nominal type: different names are
 different types even if their fields match. Type and function names occupy
-separate namespaces. Fields must have primitive type `int`, `bool`, or `str`.
-Nested, recursive and array-valued struct fields are not supported.
+separate namespaces. Fields may have primitive type `int`, `bool`, `str`, or another declared struct
+type. Recursive by-value and array-valued struct fields are not supported.
 
 Construct a struct using `new Point {x: 1, y: 2}`. Every field must appear exactly
 once, in any order. Expressions evaluate in the order written in the initializer.
 Read fields with `p.x`, including a function-return value such as `shift(p).x`.
-A plain field assignment `p.x = value;` requires a named mutable `var` binding;
+A plain field assignment `p.x = value;` requires a named mutable `var` root binding;
 field compound assignment and writes to temporary results are not implemented.
 
 Functions accept and return struct or fixed-size integer array values. A parameter
@@ -189,3 +189,19 @@ Aggregate storage and calling conventions are internal LLVM/Clang implementation
 details. No stable FFI or Rust-style ownership/borrowing guarantee is introduced.
 Empty structs and zero-length integer arrays are supported. Many large aggregate
 copies or deep recursion can still exhaust the host stack.
+
+## Nested struct layouts (0.10)
+
+Fields can contain other structs by value. Chained reads and writes, such as
+`box.start.x`, resolve each field statically. Writes require a mutable root binding;
+parameters and `let` roots remain immutable at every depth. Assigning a whole
+nested field copies a value of the exact declared nominal type. Function-return
+values support chained reads; writes still require a named mutable binding.
+
+All struct names are collected before validating layouts, so forward references
+are supported. Direct and indirect cycles are rejected because finite by-value
+storage cannot represent them. Maximum nesting depth is 64 edges. A conservative
+storage estimate sums 8 bytes for each primitive leaf field, including each copy
+of a nested struct; the per-struct limit is 65,536 bytes. Empty structs estimate
+zero bytes. This is a compiler resource limit, not a stable ABI size guarantee
+or a total stack limit.

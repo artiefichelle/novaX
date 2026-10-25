@@ -1,13 +1,13 @@
-# NOVA-X 0.9 — experimental systems-language compiler
+# NOVA-X 0.10 — experimental systems-language compiler
 
 NOVA-X compiles a small typed language to LLVM IR and native executables via
-Clang. The goal is a systems language; version 0.9 is a tested foundation,
+Clang. The goal is a systems language; version 0.10 is a tested foundation,
 not a complete replacement for C++ or Rust. See `ROADMAP.md` for unfinished work
 and `LANGUAGE.md` for the implemented language rules.
 
 ## Quick start
 
-Clone this repository, or extract `nova-x-compiler-v0.9.zip` and enter `nova-x`.
+Clone this repository, or extract `nova-x-compiler-v0.10.zip` and enter `nova-x`.
 Requirements: Python 3.10+, the dependency in `requirements.txt`, and Clang with
 a C11-capable system toolchain. Native validation was performed on macOS ARM64;
 other targets have not yet been validated.
@@ -49,7 +49,22 @@ fn main() -> int {
 }
 ```
 
-## New in 0.9 — structs and aggregate function values
+## New in 0.10 — nested struct values
+
+- A struct field may contain another named struct, including forward declarations.
+- Read and write nested fields with paths such as `rectangle.start.x`.
+- Initialization, assignment, parameters and returns retain independent value copies.
+- Direct/indirect recursive by-value layouts and unknown field types are rejected.
+- Struct depth is limited to 64 nested levels. A conservative storage estimate
+  (8 bytes per primitive field) must not exceed 64 KiB per struct. Total stack
+  use is still not bounded by this limit.
+- Array-valued struct fields, references, pointers, methods and inheritance remain
+  unimplemented. Nested field writes use plain assignment on a mutable root binding.
+- 94 tests cover nested copies, calls, writes, forward types, invalid field types,
+  cyclic definitions and storage limits. Native feature tests use `-O0` / `-O3`.
+- `examples/nested_structs.nx` prints `1`, `6`, `15`, `99`.
+
+## Added in 0.9 — structs and aggregate function values
 
 ```text
 struct Point { x: int, y: int }
@@ -196,7 +211,7 @@ short-circuit behavior, type errors, text, nested loops, symbol isolation,
 stack-slot placement, and CLI file preservation. Run the suite locally.
 
 Strings refer to immutable static data; no heap allocation or ownership model
-exists yet. Nested structs, slices, pointers, references, modules, file I/O, a package
+exists yet. Slices, pointers, references, modules, file I/O, a package
 manager, debugger integration, and a formal memory-safety model remain future
 work. Text concatenation and input are not implemented. This compiler is
 experimental and should only compile trusted programs.

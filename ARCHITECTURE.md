@@ -1,4 +1,4 @@
-# NOVA-X 0.9 compiler architecture and policy
+# NOVA-X 0.10 compiler architecture and policy
 
 ## Pipeline
 
@@ -45,7 +45,7 @@ This is an internal ABI and is not a supported external-function interface.
 Strings live for the process lifetime. Locals use stack slots allocated once
 per function invocation. Local `int[N]` arrays use `[N x i32]` stack storage and copy by value.
 They may be passed and returned by value, without exposed references.
-Structs lower to module-local named LLVM aggregate types with primitive fields;
+Structs lower to module-local named LLVM aggregate types with primitive or nested struct fields;
 they also use value semantics. This calling convention is internal and unstable.
 Recursive calls consume additional stack. Heap objects,
 mutable references, pointers exposed to source code, ownership, borrowing, and
@@ -68,3 +68,11 @@ checks, native behavior at `-O0` and `-O3`, 400 deterministic malformed-input
 samples, and 40 generated arithmetic expressions checked against a reference.
 These are bounded regression checks, not a substitute for coverage-guided
 fuzzing, a full interpreter, platform validation, or a security audit.
+
+## Nested layout validation
+
+The analyzer gathers named definitions, resolves field types, rejects cycles,
+and computes conservative size/depth limits before code generation. The backend
+predeclares all identified LLVM struct types before setting their bodies, allowing
+forward references. Nested writes lower to GEP paths rooted in a named local
+stack slot. No escaping pointer or source reference is introduced.
