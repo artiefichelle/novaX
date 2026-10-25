@@ -1,0 +1,11 @@
+// Read decimal integers until EOF (Ctrl-D on Unix terminals).
+fn main() -> int {
+    print("Enter integers, then end input:");
+    var value = box(0);
+    var sum = 0;
+    while try_read_int(value) {
+        sum = sum + read_box(value);
+    }
+    print(sum);
+    return 0;
+}
