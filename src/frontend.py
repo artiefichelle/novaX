@@ -66,10 +66,10 @@ TOKEN = re.compile(
     r'(?P<WS>\s+)|(?P<COMMENT>//[^\n]*|/\*[\s\S]*?\*/)|'
     r'(?P<STRING>"(?:[^"\\\n]|\\.)*")|(?P<NUM>[0-9]+)|'
     r'(?P<ID>[A-Za-z_][A-Za-z_0-9]*)|'
-    r'(?P<OP>\+=|-=|\*=|/=|%=|->|==|!=|<=|>=|&&|\|\||[@+*/%(){}\[\];,.:=<>!-])|(?P<BAD>.)'
+    r'(?P<OP>::|\+=|-=|\*=|/=|%=|->|==|!=|<=|>=|&&|\|\||[@+*/%(){}\[\];,.:=<>!-])|(?P<BAD>.)'
 )
 KEYWORDS = {'fn', 'let', 'var', 'return', 'if', 'else', 'while', 'break',
-            'continue', 'true', 'false', 'int', 'str', 'bool', 'struct', 'new'}
+            'continue', 'true', 'false', 'int', 'str', 'bool', 'struct', 'new', 'import', 'as', 'pub'}
 TYPES = {'int', 'str', 'bool'}
 BUILTINS = {'print', 'printf', 'len', 'to_bool', 'to_int'}
 
@@ -195,6 +195,7 @@ class FieldAssign(Node):
 class StructDef(Node):
     name: str
     fields: list[Parameter]
+    public: bool = False
 
 
 @dataclass
@@ -256,12 +257,20 @@ class Function(Node):
     args: list[Parameter]
     returns: str | ArrayType | StructType
     body: list[Node]
+    public: bool = False
+
+
+@dataclass
+class Import(Node):
+    path: str
+    alias: str
 
 
 @dataclass
 class Program(Node):
     functions: list[Function]
     structs: list[StructDef] = field(default_factory=list)
+    imports: list[Import] = field(default_factory=list)
 
 
 class Parser:
@@ -294,10 +303,22 @@ class Parser:
             raise CompileError('Expected identifier', token.span)
         return self.eat()
 
+    def qualified_name(self):
+        name = self.ident().value
+        while self.peek().value == '::':
+            self.eat('::')
+            name += '::' + self.ident().value
+        return name
+
     def type_name(self):
         token = self.eat()
         if token.value not in TYPES:
-            if token.kind == 'ID' and token.value not in KEYWORDS: return StructType(token.value)
+            if token.kind == 'ID' and token.value not in KEYWORDS:
+                name = token.value
+                while self.peek().value == '::':
+                    self.eat('::')
+                    name += '::' + self.ident().value
+                return StructType(name)
             raise CompileError('Expected type int, str, bool, array or struct name', token.span)
         if self.peek().value == '[':
             self.eat('[')
@@ -315,13 +336,34 @@ class Parser:
         start = self.peek().span
         functions = []
         structs = []
+        imports = []
         try:
             while self.peek().kind != 'EOF':
-                if self.peek().value == 'struct': structs.append(self.struct_definition())
-                else: functions.append(self.function())
+                exported = False
+                if self.peek().value == 'pub':
+                    self.eat('pub')
+                    exported = True
+                if self.peek().value == 'import':
+                    if exported: raise CompileError('Imports cannot be pub', self.peek().span)
+                    start_import = self.eat('import').span
+                    token = self.eat()
+                    if token.kind != 'STRING': raise CompileError('Expected quoted import path', token.span)
+                    try: path = json.loads(token.value)
+                    except ValueError: raise CompileError('Invalid import path', token.span) from None
+                    if not path or '\x00' in path: raise CompileError('Invalid import path', token.span)
+                    self.eat('as')
+                    alias = self.ident().value
+                    self.eat(';')
+                    imports.append(Import(self.span(start_import), path, alias))
+                elif self.peek().value == 'struct':
+                    definition = self.struct_definition(); definition.public = exported
+                    structs.append(definition)
+                else:
+                    definition = self.function(); definition.public = exported
+                    functions.append(definition)
         except RecursionError:
             raise CompileError('Program exceeds nesting limit', self.peek().span) from None
-        return Program(self.span(start), functions, structs)
+        return Program(self.span(start), functions, structs, imports)
 
     def struct_definition(self):
         start = self.eat('struct').span
@@ -458,7 +500,7 @@ class Parser:
             self.eat(')')
         elif token.value == 'new':
             self.eat()
-            name = self.ident().value
+            name = self.qualified_name()
             self.eat('{')
             fields = []
             while self.peek().value != '}':
@@ -504,7 +546,8 @@ class Parser:
             self.eat()
             left = Literal(token.span, token.value == 'true')
         else:
-            name = self.ident()
+            name_token = self.peek()
+            name = self.qualified_name()
             if self.peek().value == '(':
                 self.eat()
                 args = []
@@ -515,9 +558,9 @@ class Parser:
                             break
                         self.eat(',')
                 self.eat(')')
-                left = Call(self.span(start), name.value, args)
+                left = Call(self.span(start), name, args)
             else:
-                left = Name(name.span, name.value)
+                left = Name(name_token.span, name)
         while self.peek().value in ('[', '.'):
             if self.peek().value == '.':
                 self.eat('.')
@@ -782,7 +825,9 @@ def parse_source(text, filename='<input>'):
 
 
 def analyze_source(text, filename='<input>'):
-    return Analyzer().analyze(parse_source(text, filename))
+    program = parse_source(text, filename)
+    if program.imports: raise CompileError('Imports require the file-based module loader', program.imports[0].span)
+    return Analyzer().analyze(program)
 
 
 def optimize_program(program):

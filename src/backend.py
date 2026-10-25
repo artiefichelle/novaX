@@ -19,7 +19,7 @@ class Compiler:
         for definition in funcs.structs:
             self.struct_types[definition.name].set_body(*[self.llvm_type(field.typ) for field in definition.fields])
         for fn in funcs.functions:
-            self.funcs[fn.name]=ir.Function(self.module,ir.FunctionType(self.llvm_type(fn.returns),[self.llvm_type(arg.typ) for arg in fn.args]),name=fn.name if fn.name=='main' else 'nx_user_'+fn.name)
+            self.funcs[fn.name]=ir.Function(self.module,ir.FunctionType(self.llvm_type(fn.returns),[self.llvm_type(arg.typ) for arg in fn.args]),name=self.symbol_name(fn.name))
         self.printf=ir.Function(self.module,ir.FunctionType(I32,[ir.IntType(8).as_pointer()],var_arg=True),name='printf')
         self.fail=ir.Function(self.module,ir.FunctionType(ir.VoidType(),[STR]),name='nx_rt_fail')
         self.fail.attributes.add('noreturn')
@@ -30,6 +30,10 @@ class Compiler:
             typ=ir.FunctionType(ir.LiteralStructType([I32,ir.IntType(1)]),[I32,I32])
             self.checked[op]=ir.Function(self.module,typ,name=f'llvm.s{op}.with.overflow.i32')
         for fn in funcs.functions: self.generate(fn.name,fn.args,fn.body)
+    def symbol_name(self,name):
+        if name=='main': return name
+        if '::' not in name: return 'nx_user_'+name
+        return 'nx_module_'+'_'.join(str(len(part))+part for part in name.split('::'))
     def llvm_type(self,typ):
         if isinstance(typ,ArrayType): return ir.ArrayType(I32,typ.size)
         if isinstance(typ,StructType): return self.struct_types[typ.name]

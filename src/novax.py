@@ -8,11 +8,12 @@ from llvmlite import binding
 import json
 import tempfile
 
-VERSION="0.10.0"
+VERSION="0.11.0"
 
 from frontend import CompileError, analyze_source, optimize_program
 from backend import Compiler
 from ranges import RangeAnalysis
+from modules import load_program
 
 def main():
     ap=argparse.ArgumentParser(description='NOVA-X experimental systems-language compiler')
@@ -28,8 +29,10 @@ def main():
     try:
         source=Path(args.source).resolve(); output=Path(args.output).resolve()
         if not args.check and source == output: raise CompileError('Output must not overwrite source')
-        src=source.read_text(encoding='utf8')
-        ast=analyze_source(src,str(source)); ast,report=optimize_program(ast)
+        ast,dependencies=load_program(source)
+        if not args.check and output in dependencies: raise CompileError('Output must not overwrite any source module')
+        ast,report=optimize_program(ast)
+        report['source_modules']=len(dependencies)
         facts=RangeAnalysis().analyze(ast) if args.O in ('2','3') and not args.no_range_opt else {}
         c=Compiler(ast,facts); llvm=str(c.module)
         report['modulo_reductions']=c.modulo_reductions
