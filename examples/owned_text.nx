@@ -1,0 +1,14 @@
+// Text owns immutable UTF-8 bytes. Borrow operations do not move its owner.
+fn greeting(name: Text) -> Text {
+    let prefix = text("Hallo ");
+    return text_concat(prefix, name);
+}
+fn main() -> int {
+    let name = text("Welt 🌍");
+    let message = greeting(name); // name moves into greeting
+    print_text(message);
+    print(text_len(message)); // UTF-8 bytes, not characters
+    let independent = text_clone(message);
+    print(text_equal(message, independent));
+    return 0; // both owners are automatically freed
+}
