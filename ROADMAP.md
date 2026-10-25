@@ -1,7 +1,7 @@
 # Toward a NOVA-X systems language
 
 The user's intended direction is a systems language similar in purpose to C++
-or Rust. A version number does not establish completeness. Version 0.12 is a
+or Rust. A version number does not establish completeness. Version 0.13 is a
 foundation with three primitive types, integer arrays and nested structs, static text, native code generation, and checked
 integer operations. The following capabilities are not implemented.
 
@@ -101,3 +101,13 @@ and version migration. Do not label the language complete before that work is do
 ## Completed in 0.12
 
 `BoxInt`, `box`, `read_box` and `write_box` now implement restricted unique heap ownership, moves and automatic drops. General references, owned aggregate fields and lifetime checking remain unfinished. `OWNERSHIP_DESIGN.md` defines the implemented subset and its conservative control-flow restrictions.
+
+## Completed in 0.13
+
+- [x] Merge ownership only along branches reaching a continuation.
+- [x] Check loop-header availability on normal and continue backedges.
+- [x] Track break exits separately from returned paths and nested loop transfers.
+- [x] Validate loop ownership with native O0/O3 tests, allocation counters and ASan.
+
+General references, owned aggregates and a full lifetime/alias analysis remain
+future work. The implemented structured analysis is not a general borrow checker.

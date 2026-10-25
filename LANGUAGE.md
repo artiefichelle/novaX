@@ -1,4 +1,4 @@
-# Implemented language — NOVA-X 0.12
+# Implemented language — NOVA-X 0.13
 
 This document specifies implemented behavior, not planned features.
 
@@ -250,3 +250,13 @@ fn main() -> int {
 annotate locals, parameters and return types. It has move semantics; primitive
 and aggregate values retain copy semantics. See `OWNERSHIP_DESIGN.md` for exit
 cleanup, branch joins, loop restrictions, allocation failure and unsupported uses.
+
+## Version 0.13: reachable ownership paths
+
+Branch joins intersect ownership availability only for paths reaching the same
+continuation. Loop bodies may move outer owners if every normal backedge and
+`continue` reinitializes the owners available at the header. Break states merge
+at the nearest loop exit; return states exit the function. Loop conditions still
+cannot move outer owners. Zero-iteration exits remain conservatively possible.
+See `OWNERSHIP_DESIGN.md` for the invariant and `examples/ownership_flow.nx`
+for an executable example. General references and lifetime checking remain open.

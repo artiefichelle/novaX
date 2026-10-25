@@ -1,4 +1,4 @@
-# NOVA-X 0.12 compiler architecture and policy
+# NOVA-X 0.13 compiler architecture and policy
 
 ## Pipeline
 
@@ -90,3 +90,13 @@ LLVM module and runtime, not separate compilation or a stable library ABI.
 ## Version 0.12 ownership update
 
 `BoxInt`, `box`, `read_box` and `write_box` now implement restricted unique heap ownership, moves and automatic drops. General references, owned aggregate fields and lifetime checking remain unfinished. `OWNERSHIP_DESIGN.md` defines the implemented subset and its conservative control-flow restrictions.
+
+## Version 0.13: reachable ownership paths
+
+Branch joins intersect ownership availability only for paths reaching the same
+continuation. Loop bodies may move outer owners if every normal backedge and
+`continue` reinitializes the owners available at the header. Break states merge
+at the nearest loop exit; return states exit the function. Loop conditions still
+cannot move outer owners. Zero-iteration exits remain conservatively possible.
+See `OWNERSHIP_DESIGN.md` for the invariant and `examples/ownership_flow.nx`
+for an executable example. General references and lifetime checking remain open.

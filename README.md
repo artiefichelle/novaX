@@ -1,13 +1,13 @@
-# NOVA-X 0.12 — experimental systems-language compiler
+# NOVA-X 0.13 — experimental systems-language compiler
 
 NOVA-X compiles a small typed language to LLVM IR and native executables via
-Clang. The goal is a systems language; version 0.12 is a tested foundation,
+Clang. The goal is a systems language; version 0.13 is a tested foundation,
 not a complete replacement for C++ or Rust. See `ROADMAP.md` for unfinished work
 and `LANGUAGE.md` for the implemented language rules.
 
 ## Quick start
 
-Clone this repository, or extract `nova-x-compiler-v0.12.zip` and enter `nova-x`.
+Clone this repository, or extract `nova-x-compiler-v0.13.zip` and enter `nova-x`.
 Requirements: Python 3.10+, the dependency in `requirements.txt`, and Clang with
 a C11-capable system toolchain. Native validation was performed on macOS ARM64;
 other targets have not yet been validated.
@@ -48,6 +48,20 @@ fn main() -> int {
     return 0;
 }
 ```
+
+## New in 0.13: ownership across control flow
+
+- A branch ending in `return`, `break` or `continue` no longer affects the
+  ownership state at a continuation it cannot reach.
+- An outer BoxInt can move inside a loop body if it is reinitialized before
+  every reachable next iteration, including `continue`.
+- Moving an outer owner on a `break` or `return` path is permitted. Break states
+  participate in the loop-exit join; returned states do not.
+- Zero-iteration exits remain possible in the analysis. Moves in loop conditions
+  are still rejected. There is no escaping reference or general borrow checker.
+
+Try `examples/ownership_flow.nx` (prints `11`). The suite has 135 tests,
+including native O0/O3 tests, allocation accounting and AddressSanitizer checks.
 
 ## Added in 0.11 — multi-file modules
 
@@ -265,6 +279,5 @@ binding. Scope exit, overwrite, return, break and continue automatically drop
 remaining owners. Try `examples/ownership.nx`.
 
 This is a restricted ownership foundation. There are no source references,
-heap-owning struct fields or general lifetime/alias analysis. Moves from outer
-bindings inside loops are rejected; branch joins conservatively require ownership
-on both paths. See `OWNERSHIP_DESIGN.md` for precise restrictions.
+heap-owning struct fields or general lifetime/alias analysis. Version 0.13 now
+checks ownership at each loop backedge and merges only continuing branch paths. See `OWNERSHIP_DESIGN.md` for precise restrictions.

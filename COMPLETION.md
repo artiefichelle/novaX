@@ -1,6 +1,6 @@
 # What remains before a complete systems-language release
 
-NOVA-X is still experimental. Version 0.12 is not a completed C++/Rust alternative.
+NOVA-X is still experimental. Version 0.13 is not a completed C++/Rust alternative.
 This is a status checklist, not a claim that every feature below is implemented.
 
 | Area | Current state | Remaining work |
@@ -31,3 +31,13 @@ an agreed feature scope and verified acceptance criteria.
 ## Version 0.12 ownership update
 
 `BoxInt`, `box`, `read_box` and `write_box` now implement restricted unique heap ownership, moves and automatic drops. General references, owned aggregate fields and lifetime checking remain unfinished. `OWNERSHIP_DESIGN.md` defines the implemented subset and its conservative control-flow restrictions.
+
+## Version 0.13: reachable ownership paths
+
+Branch joins intersect ownership availability only for paths reaching the same
+continuation. Loop bodies may move outer owners if every normal backedge and
+`continue` reinitializes the owners available at the header. Break states merge
+at the nearest loop exit; return states exit the function. Loop conditions still
+cannot move outer owners. Zero-iteration exits remain conservatively possible.
+See `OWNERSHIP_DESIGN.md` for the invariant and `examples/ownership_flow.nx`
+for an executable example. General references and lifetime checking remain open.

@@ -1,7 +1,7 @@
-# Ownership in NOVA-X 0.12
+# Ownership in NOVA-X 0.13
 
 The chosen direction is automatic reclamation with checked ownership, similar
-in intent to Rust. Version 0.12 implements a restricted unique owner, not a
+in intent to Rust. Version 0.13 implements a restricted unique owner, not a
 general borrow checker or Rust-equivalent safety guarantee.
 
 ## Implemented subset
@@ -18,11 +18,24 @@ general borrow checker or Rust-equivalent safety guarantee.
   scopes. Assignment evaluates its RHS before dropping the old owner. Discarded
   owned expression results are dropped. Function parameters are owners too.
 - Generated owner slots become null on moves; null drops are harmless.
-- Branch analysis checks each branch from the same initial state, then requires
-  availability on both paths, conservatively even if one path returns.
-- Moving an outer owner inside a loop, including its condition, is rejected.
-  Loop-local owners can move. Initialization inside a loop is not definite after
-  the loop because it might execute zero times.
+- Branch analysis checks each branch from the same initial state. Only branches
+  that reach the continuation participate in its availability intersection.
+- Each loop records its header state. Every reachable normal backedge and
+  `continue` must restore all outer owners available at that header. The analysis
+  starts each body with the header state, so this invariant holds inductively
+  over repeated iterations. Replacing an allocation is allowed; preserving its
+  identity is not required.
+- `break` records the outer state at that exit and has no backedge requirement.
+  Returns leave the function and do not contribute to branch or loop-exit joins.
+  Nested transfers target the nearest enclosing loop. Inner locals drop normally.
+- The loop-exit state intersects entry availability (possible zero iterations)
+  with all break states. Even `while true` retains the conservative entry path;
+  no constant-condition reachability proof is performed. A loop cannot make an
+  initially moved owner definitely initialized afterward.
+- Moves of outer owners in loop conditions remain rejected. Conditions may
+  read or update boxed integer contents without transferring ownership.
+- Lexical scope identity distinguishes shadowed bindings. Replacing an inner
+  variable of the same name cannot repair a moved outer owner.
 - BoxInt cannot be printed or compared directly or stored in arrays/structs.
   Primitives, static strings and existing aggregates retain copy semantics.
 - Allocation failure and invalid internal pointers terminate with a diagnostic.
@@ -32,8 +45,9 @@ general borrow checker or Rust-equivalent safety guarantee.
 ## Still required
 
 General owned types and aggregate moves, source shared/exclusive references,
-lifetime/escape checks, a control-flow dataflow analysis permitting safe
-loop-carried ownership, destructors and a defined native FFI boundary.
+lifetime/escape checks, a general CFG representation beyond the current
+structured-control-flow availability analysis, destructors and a defined native
+FFI boundary.
 No tracing garbage collector is introduced.
 
 ## Validation
@@ -44,3 +58,10 @@ Native tests run at O0/O3. An instrumented runtime counts live allocations acros
 normal exits, early returns, overwritten values, moved parameters, discarded
 results, break and continue; AddressSanitizer additionally checks those runs.
 Validation currently covers macOS ARM64 only.
+
+## Version 0.13 validation
+
+16 additional tests exercise reachable branch joins, replacing owners in loops,
+continue backedges, break-state joins, nested loops, shadowing and returned owners.
+The native memory test covers these paths at O0/O3 using allocation accounting
+and AddressSanitizer. This extends the existing 119-test baseline to 135 tests.
