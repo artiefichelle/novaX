@@ -190,7 +190,7 @@ class SystemsFoundationTests(unittest.TestCase):
     def test_cli_check_and_version(self):
         version=subprocess.run([sys.executable,str(COMPILER),'--version'],capture_output=True,text=True,timeout=20)
         self.assertEqual(version.returncode,0,version.stderr)
-        self.assertIn('0.8.0',version.stdout)
+        self.assertIn('0.9.0',version.stdout)
         with tempfile.TemporaryDirectory() as d:
             source=Path(d)/'input.nx'; source.write_text('fn main() -> int {return 0;}')
             output=Path(d)/'absent'
@@ -340,12 +340,8 @@ class ArrayTests(unittest.TestCase):
                 self.assertIn('test.nx:1:',p.stderr)
                 self.assertNotIn('Traceback',p.stderr)
 
-    def test_array_parameters_and_returns_rejected(self):
-        for source in ('fn f(a:int[1]) -> int {return 0;} fn main() -> int {return 0;}',
-                       'fn f() -> int[1] {return [1];} fn main() -> int {return 0;}'):
-            p,_,_=self.compile_source(source)
-            self.assertNotEqual(p.returncode,0)
-            self.assertIn('arrays must be local',p.stderr)
+    def test_array_parameters_and_returns(self):
+        self.native('fn echo(a:int[2]) -> int[2] {var copy=a;copy[0]=99;return copy;}fn main() -> int {let a=[1,2];let b=echo(a);print(a[0]);print(b[0]);return 0;}', '1\n99\n')
 
     def test_array_size_limit(self):
         for declaration in ('let a:int[4097]=[];','let a:int[-1]=[];',
@@ -409,6 +405,85 @@ class RangeOptimizationTests(unittest.TestCase):
     def test_modulo_threshold_and_zero_iterations(self):
         self.compare_modes('fn main() -> int {var x=199;print(x%100);x=200;print(x%100);x=-1;print(x%100);print(2147483647%2147483647);return 0;}', '99\n0\n-1\n0\n')
         self.compare_modes('fn main() -> int {var x=100;var i=0;while i<0 {x=(x+1)%7;i+=1;}print(x%7);return 0;}', '2\n')
+
+class AggregateFunctionTests(unittest.TestCase):
+    compile_source=CompilerTests.compile_source
+    native=LanguageV02Tests.native
+
+    def test_struct_construction_copy_and_functions(self):
+        self.native('struct Point {x:int,y:int} '
+                    'fn move(p:Point,dx:int) -> Point {var copy=p;copy.x=copy.x+dx;return copy;} '
+                    'fn main() -> int {let p=new Point {y:20,x:10};var q=move(p,5);'
+                    'print(p.x);print(q.x);q.y=99;print(p.y);print(q.y);print(move(p,2).x);return 0;}',
+                    '10\n15\n20\n99\n12\n')
+
+    def test_struct_primitive_fields_and_order(self):
+        self.native('struct Item {enabled:bool,label:str,count:int,} '
+                    'fn first() -> int {print(1);return 4;} '
+                    'fn second() -> bool {print(2);return true;} '
+                    'fn main() -> int {var item=new Item {count:first(),enabled:second(),label:"text"};'
+                    'print(item.enabled);print(item.label);item.label="new";print(item.label);print(item.count);return 0;}',
+                    '1\n2\ntrue\ntext\nnew\n4\n')
+
+    def test_array_function_return_and_local_mutability(self):
+        self.native('fn make() -> int[3] {return [4,5,6];} '
+                    'fn sum(a:int[3]) -> int {var i=0;var total=0;while i<len(a) {total+=a[i];i+=1;}return total;} '
+                    'fn main() -> int {let a=make();print(sum(a));print(len(make()));return 0;}', '15\n3\n')
+
+    def test_aggregate_parameter_mutation_is_rejected(self):
+        for source in [
+            'fn f(a:int[1]) -> int {a[0]=1;return 0;}fn main() -> int {return 0;}',
+            'struct P {x:int}fn f(p:P) -> int {p.x=1;return 0;}fn main() -> int {return 0;}',
+        ]:
+            p,_,_=self.compile_source(source)
+            self.assertNotEqual(p.returncode,0)
+            self.assertIn('immutable',p.stderr)
+
+    def test_invalid_structs(self):
+        sources=[
+            'struct P {x:int,x:int}fn main() -> int {return 0;}',
+            'struct P {x:int}struct P {y:int}fn main() -> int {return 0;}',
+            'struct P {x:Missing}fn main() -> int {return 0;}',
+            'struct P {x:int[2]}fn main() -> int {return 0;}',
+            'fn f(p:Missing) -> int {return 0;}fn main() -> int {return 0;}',
+        ]
+        for source in sources:
+            p,_,_=self.compile_source(source)
+            self.assertNotEqual(p.returncode,0)
+            self.assertNotIn('Traceback',p.stderr)
+
+    def test_struct_initializer_and_field_errors(self):
+        bodies=['let p=new P {};','let p=new P {x:1,x:2};','let p=new P {y:1};',
+                'let p=new P {x:true};','let p=new P {x:1};p.x=2;',
+                'var p=new P {x:1};p.x=false;','let p=new P {x:1};print(p.y);',
+                'let p=new P {x:1};print(p);','let p=new P {x:1};print(p==p);',
+                'let p:Missing=new P {x:1};','new P {x:1}.x=2;']
+        for body in bodies:
+            p,_,_=self.compile_source('struct P {x:int}fn main() -> int {'+body+'return 0;}')
+            self.assertNotEqual(p.returncode,0)
+            self.assertIn('test.nx:1:',p.stderr)
+            self.assertNotIn('Traceback',p.stderr)
+
+    def test_aggregate_function_type_errors(self):
+        for source in [
+            'fn f(a:int[2]) -> int {return 0;}fn main() -> int {return f([1]);}',
+            'fn f() -> int[2] {return [1];}fn main() -> int {return 0;}',
+            'struct A {x:int}struct B {x:int}fn f(p:A) -> int {return 0;}fn main() -> int {return f(new B {x:1});}',
+        ]:
+            p,_,_=self.compile_source(source)
+            self.assertNotEqual(p.returncode,0)
+            self.assertIn('expected',p.stderr)
+
+    def test_array_return_bounds_are_checked(self):
+        for level in ('0','3'):
+            p,_,exe=self.compile_source('fn make() -> int[1] {return [42];}fn main() -> int {let a=make();print(a[1]);return 0;}',False,level)
+            self.assertEqual(p.returncode,0,p.stderr)
+            self.assertEqual(exe.returncode,1)
+            self.assertIn('array index out of bounds',exe.stderr)
+
+    def test_empty_aggregates_and_forward_type(self):
+        self.native('fn echo(e:Empty,a:int[0]) -> Empty {return e;} '
+                    'struct Empty {} fn main() -> int {let e=echo(new Empty {},[]);print(len([]));return 0;}', '0\n')
 
 if __name__=='__main__':unittest.main()
 

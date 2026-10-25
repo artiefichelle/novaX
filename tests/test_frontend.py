@@ -8,7 +8,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
 from frontend import (Analyzer, Binary, Call, CompileError, Decl, Literal, Name,
-                      Parser, Program, Source, Span, Unary, ArrayType, ArrayLiteral, Index, IndexAssign, analyze_source, lex,
+                      Parser, Program, Source, Span, Unary, ArrayType, ArrayLiteral, Index, IndexAssign, StructType, StructLiteral, Field, analyze_source, lex,
                       optimize_program, parse_source)
 
 
@@ -154,6 +154,22 @@ class AnalyzerTests(unittest.TestCase):
         self.assertEqual(declaration.value.elements[0].value, 3)
         self.assertEqual(assignment.value.value, 12)
         self.assertEqual(report['constant_folds'], 2)
+
+    def test_struct_nodes_and_types(self):
+        program=analyze_source('struct P {x:int}fn main() -> int {let p=new P {x:1};return p.x;}')
+        declaration,returned=program.functions[0].body
+        self.assertIsInstance(declaration.value,StructLiteral)
+        self.assertEqual(declaration.value.typ,StructType('P'))
+        self.assertIsInstance(returned.value,Field)
+        self.assertEqual(returned.value.typ,'int')
+        self.assertEqual(program.structs[0].fields[0].name,'x')
+
+    def test_struct_optimizer_preserves_initializers(self):
+        program=analyze_source('struct P {x:int}fn main() -> int {var p=new P {x:1+2};p.x=3*4;return p.x;}')
+        program,report=optimize_program(program)
+        self.assertEqual(program.functions[0].body[0].value.fields[0][1].value,3)
+        self.assertEqual(program.functions[0].body[1].value.value,12)
+        self.assertEqual(report['constant_folds'],2)
 
     def test_validate_before_optimization(self):
         for expression in ('2147483648 - 1', 'false && missing()', 'true || "text"'):
