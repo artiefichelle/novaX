@@ -1,0 +1,10 @@
+// Unique heap ownership: passing and returning a BoxInt moves it.
+fn relay(value: BoxInt) -> BoxInt { return value; }
+fn main() -> int {
+    let original = box(21);
+    var owner = relay(original);
+    write_box(owner, read_box(owner) * 2);
+    print(read_box(owner));
+    // read_box(original) would be rejected: use after move.
+    return 0; // owner is automatically freed.
+}
