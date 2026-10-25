@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""NOVA-X prototype compiler: experimental typed integers and strings -> LLVM IR -> clang executable."""
+"""NOVA-X prototype compiler: experimental typed integers, booleans and strings -> LLVM IR -> clang executable."""
 import argparse
 import subprocess
 import sys
@@ -8,7 +8,7 @@ from llvmlite import binding
 import json
 import tempfile
 
-VERSION="0.5.0"
+VERSION="0.6.0"
 
 from frontend import CompileError, analyze_source, optimize_program
 from backend import Compiler

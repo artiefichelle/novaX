@@ -69,9 +69,9 @@ TOKEN = re.compile(
     r'(?P<OP>\+=|-=|\*=|/=|%=|->|==|!=|<=|>=|&&|\|\||[@+*/%(){};,:=<>!-])|(?P<BAD>.)'
 )
 KEYWORDS = {'fn', 'let', 'var', 'return', 'if', 'else', 'while', 'break',
-            'continue', 'true', 'false', 'int', 'str'}
-TYPES = {'int', 'str'}
-BUILTINS = {'print', 'printf', 'len'}
+            'continue', 'true', 'false', 'int', 'str', 'bool'}
+TYPES = {'int', 'str', 'bool'}
+BUILTINS = {'print', 'printf', 'len', 'to_bool', 'to_int'}
 
 
 def lex(source):
@@ -110,7 +110,7 @@ class Expr(Node):
 
 @dataclass
 class Literal(Expr):
-    value: int | str
+    value: int | str | bool
 
 
 @dataclass
@@ -236,7 +236,7 @@ class Parser:
     def type_name(self):
         token = self.eat()
         if token.value not in TYPES:
-            raise CompileError('Expected type int or str', token.span)
+            raise CompileError('Expected type int, str or bool', token.span)
         return token.value
 
     def parse(self):
@@ -377,7 +377,7 @@ class Parser:
             left = Literal(token.span, int(digits))
         elif token.value in ('true', 'false'):
             self.eat()
-            left = Literal(token.span, int(token.value == 'true'))
+            left = Literal(token.span, token.value == 'true')
         else:
             name = self.ident()
             if self.peek().value == '(':
@@ -452,7 +452,9 @@ class Analyzer:
 
     def expression(self, expr):
         if isinstance(expr, Literal):
-            if isinstance(expr.value, int):
+            if isinstance(expr.value, bool):
+                expr.typ = 'bool'
+            elif isinstance(expr.value, int):
                 if not -2147483648 <= expr.value <= 2147483647:
                     raise CompileError('Integer literal exceeds i32 range', expr.span)
                 expr.typ = 'int'
@@ -461,11 +463,12 @@ class Analyzer:
         elif isinstance(expr, Name):
             expr.typ = self.lookup(expr.name, expr.span).typ
         elif isinstance(expr, Call):
-            if expr.name == 'len':
+            if expr.name in ('len', 'to_bool', 'to_int'):
                 if len(expr.args) != 1:
-                    raise CompileError('Wrong number of arguments to len', expr.span)
-                self.expect(expr.args[0], 'str', 'Argument to len')
-                expr.typ = 'int'
+                    raise CompileError('Wrong number of arguments to ' + expr.name, expr.span)
+                arg_type = {'len': 'str', 'to_bool': 'int', 'to_int': 'bool'}[expr.name]
+                self.expect(expr.args[0], arg_type, 'Argument to ' + expr.name)
+                expr.typ = 'bool' if expr.name == 'to_bool' else 'int'
             else:
                 fn = self.functions.get(expr.name)
                 if fn is None:
@@ -479,14 +482,25 @@ class Analyzer:
             if expr.op == '-' and isinstance(expr.operand, Literal) and expr.operand.value == 2147483648:
                 expr.operand.typ = 'int'
             else:
-                self.expect(expr.operand, 'int', 'Unary ' + expr.op)
-            expr.typ = 'int'
+                self.expect(expr.operand, 'bool' if expr.op == '!' else 'int', 'Unary ' + expr.op)
+            expr.typ = 'bool' if expr.op == '!' else 'int'
         elif isinstance(expr, Binary):
             left = self.expression(expr.left)
-            if expr.op not in ('==', '!=', '<', '>', '<=', '>=') and left != 'int':
-                raise CompileError('Operator ' + expr.op + ': expected int, got ' + left, expr.left.span)
-            self.expect(expr.right, left, 'Operator ' + expr.op)
-            expr.typ = 'int'
+            if expr.op in ('&&', '||'):
+                if left != 'bool':
+                    raise CompileError('Operator ' + expr.op + ': expected bool, got ' + left, expr.left.span)
+                self.expect(expr.right, 'bool', 'Operator ' + expr.op)
+                expr.typ = 'bool'
+            elif expr.op in ('==', '!=', '<', '>', '<=', '>='):
+                if expr.op not in ('==', '!=') and left == 'bool':
+                    raise CompileError('Ordering requires int or str, got bool', expr.left.span)
+                self.expect(expr.right, left, 'Operator ' + expr.op)
+                expr.typ = 'bool'
+            else:
+                if left != 'int':
+                    raise CompileError('Operator ' + expr.op + ': expected int, got ' + left, expr.left.span)
+                self.expect(expr.right, 'int', 'Operator ' + expr.op)
+                expr.typ = 'int'
         else:
             raise TypeError('Unknown expression node: ' + type(expr).__name__)
         return expr.typ
@@ -519,11 +533,11 @@ class Analyzer:
                     raise CompileError(stmt.kind + ' is only allowed inside a loop', stmt.span)
                 terminated = True
             elif isinstance(stmt, If):
-                self.expect(stmt.condition, 'int', 'if condition')
+                self.expect(stmt.condition, 'bool', 'if condition')
                 yes, no = self.block(stmt.yes), self.block(stmt.no)
                 terminated = yes and no
             elif isinstance(stmt, While):
-                self.expect(stmt.condition, 'int', 'while condition')
+                self.expect(stmt.condition, 'bool', 'while condition')
                 self.loops += 1
                 self.block(stmt.body)
                 self.loops -= 1

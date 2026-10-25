@@ -5,7 +5,8 @@ from frontend import (CompileError, Literal, Name, Call, Unary, Binary,
 
 I32=ir.IntType(32)
 STR=ir.IntType(8).as_pointer()
-TYPES={'int':I32,'str':STR}
+BOOL=ir.IntType(1)
+TYPES={'int':I32,'str':STR,'bool':BOOL}
 class Compiler:
     def __init__(self, funcs):
         self.module=ir.Module(name='nova_x'); self.module.triple=binding.get_default_triple(); self.funcs={}
@@ -64,36 +65,38 @@ class Compiler:
     def value(self,e):
         b=self.builder
         if isinstance(e,Literal):
-            return self.string_constant(e.value) if e.typ=='str' else ir.Constant(I32,e.value)
+            return self.string_constant(e.value) if e.typ=='str' else ir.Constant(TYPES[e.typ],e.value)
         if isinstance(e,Name): return b.load(self.lookup(e.name)[0])
         if isinstance(e,Call):
             if e.name=='len': return b.call(self.strlen,[self.value(e.args[0])])
+            if e.name=='to_bool': return b.icmp_signed('!=',self.value(e.args[0]),ir.Constant(I32,0))
+            if e.name=='to_int': return b.zext(self.value(e.args[0]),I32)
             return b.call(self.funcs[e.name],[self.value(x) for x in e.args])
         if isinstance(e,Unary):
             if e.op=='-' and isinstance(e.operand,Literal) and e.operand.value==2147483648:
                 return ir.Constant(I32,-2147483648)
             v=self.value(e.operand)
-            return self.arithmetic('-',ir.Constant(I32,0),v) if e.op=='-' else b.zext(b.icmp_signed('==',v,ir.Constant(I32,0)),I32)
+            return self.arithmetic('-',ir.Constant(I32,0),v) if e.op=='-' else b.not_(v)
         if isinstance(e,Binary):
             op=e.op; a=self.value(e.left)
             if op in ('&&','||'):
                 origin=b.block; f=b.function
                 rhs=f.append_basic_block('logic.rhs'); end=f.append_basic_block('logic.end')
-                test=b.icmp_signed('!=',a,ir.Constant(I32,0))
+                test=a
                 b.cbranch(test,rhs,end) if op=='&&' else b.cbranch(test,end,rhs)
                 b.position_at_end(rhs)
-                c=self.value(e.right); truth=b.zext(b.icmp_signed('!=',c,ir.Constant(I32,0)),I32)
+                truth=self.value(e.right)
                 rhs_end=b.block; b.branch(end); b.position_at_end(end)
-                result=b.phi(I32,'logic.result')
-                result.add_incoming(ir.Constant(I32,0 if op=='&&' else 1),origin)
+                result=b.phi(BOOL,'logic.result')
+                result.add_incoming(ir.Constant(BOOL,0 if op=='&&' else 1),origin)
                 result.add_incoming(truth,rhs_end)
                 return result
             c=self.value(e.right)
             if op in ('<','>','<=','>=','==','!='):
                 if e.left.typ=='str':
                     compared=b.call(self.strcmp,[a,c])
-                    return b.zext(b.icmp_signed(op,compared,ir.Constant(I32,0)),I32)
-                return b.zext(b.icmp_signed(op,a,c),I32)
+                    return b.icmp_signed(op,compared,ir.Constant(I32,0))
+                return b.icmp_signed(op,a,c)
             return self.arithmetic(op,a,c)
         raise CompileError('Invalid expression')
     def statements(self,items):
@@ -112,10 +115,12 @@ class Compiler:
             elif isinstance(s,Transfer): b.branch(self.loops[-1][0 if s.kind=='continue' else 1])
             elif isinstance(s,Return): b.ret(self.value(s.value))
             elif isinstance(s,Print):
-                v=self.value(s.value); fmt=self.string_constant('%s\n' if v.type==STR else '%d\n')
+                v=self.value(s.value)
+                if s.value.typ=='bool': v=b.select(v,self.string_constant('true'),self.string_constant('false'))
+                fmt=self.string_constant('%s\n' if v.type==STR else '%d\n')
                 b.call(self.printf,[fmt,v])
             elif isinstance(s,If):
-                cond=self.value(s.condition); test=b.icmp_signed('!=',cond,ir.Constant(I32,0)); f=b.function
+                test=self.value(s.condition); f=b.function
                 yes=f.append_basic_block('if.yes'); no=f.append_basic_block('if.no'); end=f.append_basic_block('if.end')
                 b.cbranch(test,yes,no); b.position_at_end(yes); self.statements(s.yes); yt=b.block.is_terminated
                 if not yt:b.branch(end)
@@ -126,7 +131,7 @@ class Compiler:
             elif isinstance(s,While):
                 f=b.function; cond_block=f.append_basic_block('while.cond'); body=f.append_basic_block('while.body'); end=f.append_basic_block('while.end')
                 b.branch(cond_block); b.position_at_end(cond_block)
-                test=b.icmp_signed('!=',self.value(s.condition),ir.Constant(I32,0)); b.cbranch(test,body,end)
+                test=self.value(s.condition); b.cbranch(test,body,end)
                 b.position_at_end(body); self.loops.append((cond_block,end)); self.statements(s.body); self.loops.pop()
                 if not b.block.is_terminated:b.branch(cond_block)
                 b.position_at_end(end)
