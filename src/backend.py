@@ -1,13 +1,13 @@
 """LLVM lowering for an already analyzed NOVA-X Program."""
 from llvmlite import ir, binding
 from frontend import (CompileError, Literal, Name, Call, Unary, Binary, ArrayLiteral, Index, IndexAssign, ArrayType, StructType, StructLiteral, Field, FieldAssign,
-                      Decl, Assign, Return, Print, ExprStmt, If, While, Transfer)
+                      Decl, Assign, Return, Print, ExprStmt, If, While, Transfer, OWNED_TYPES)
 
 I32=ir.IntType(32)
 STR=ir.IntType(8).as_pointer()
 BOOL=ir.IntType(1)
 BOX=I32.as_pointer()
-TYPES={'int':I32,'str':STR,'bool':BOOL,'BoxInt':BOX}
+TYPES={'int':I32,'str':STR,'bool':BOOL,'BoxInt':BOX,'Text':STR}
 class Compiler:
     def __init__(self, funcs, ranges=None):
         self.ranges=ranges or {}; self.modulo_reductions=0
@@ -32,6 +32,14 @@ class Compiler:
         self.box_drop=ir.Function(self.module,ir.FunctionType(ir.VoidType(),[BOX]),name='nx_rt_box_drop')
         self.read_int=ir.Function(self.module,ir.FunctionType(I32,[]),name='nx_rt_read_int')
         self.try_read_int=ir.Function(self.module,ir.FunctionType(I32,[BOX]),name='nx_rt_try_read_int')
+        self.text_functions={}
+        signatures={'text':(STR,[STR]),'text_len':(I32,[STR]),'text_byte':(I32,[STR,I32]),
+                    'text_concat':(STR,[STR,STR]),'text_clone':(STR,[STR]),
+                    'text_equal':(I32,[STR,STR]),'print_text':(I32,[STR])}
+        for name,(result,args) in signatures.items():
+            self.text_functions[name]=ir.Function(self.module,ir.FunctionType(result,args),name='nx_rt_'+name)
+        self.text_drop=ir.Function(self.module,ir.FunctionType(ir.VoidType(),[STR]),name='nx_rt_text_drop')
+        self.drop_functions={'BoxInt':self.box_drop,'Text':self.text_drop}
         self.checked={}
         for op in ('add','sub','mul'):
             typ=ir.FunctionType(ir.LiteralStructType([I32,ir.IntType(1)]),[I32,I32])
@@ -56,11 +64,15 @@ class Compiler:
         slot,_=self.lookup(node.name)
         return self.builder.gep(slot,[ir.Constant(I32,0)]+[ir.Constant(I32,index) for index in reversed(indices)])
     def generate(self,name,args,body):
-        fun=self.funcs[name]; allocations=fun.append_basic_block('allocations'); entry=fun.append_basic_block('entry'); self.allocations=ir.IRBuilder(allocations); self.builder=ir.IRBuilder(entry); self.scopes=[{}]; self.loops=[]
+        fun=self.funcs[name]; allocations=fun.append_basic_block('allocations'); entry=fun.append_basic_block('entry'); self.allocations=ir.IRBuilder(allocations); self.builder=ir.IRBuilder(entry); self.scopes=[{}]; self.loops=[]; self.owned_slots={}
         for parameter,arg in zip(args,fun.args):
             arg_name=parameter.name
             if arg_name in self.scopes[-1]: raise CompileError('Duplicate argument: '+arg_name)
-            slot=self.allocations.alloca(arg.type,name=arg_name); self.builder.store(arg,slot); self.scopes[-1][arg_name]=(slot,False)
+            slot=self.allocations.alloca(arg.type,name=arg_name)
+            if parameter.typ in OWNED_TYPES:
+                self.owned_slots[slot]=parameter.typ
+                self.allocations.store(ir.Constant(arg.type,None),slot)
+            self.builder.store(arg,slot); self.scopes[-1][arg_name]=(slot,False)
         self.statements(body)
         if not self.builder.block.is_terminated: raise CompileError(f'Function {name} may exit without returning a value')
         self.allocations.branch(entry)
@@ -71,9 +83,10 @@ class Compiler:
     def cleanup(self,scopes):
         for scope in reversed(scopes):
             for slot,_ in reversed(list(scope.values())):
-                if slot.type.pointee == BOX:
-                    self.builder.call(self.box_drop,[self.builder.load(slot)])
-                    self.builder.store(ir.Constant(BOX,None),slot)
+                typ=self.owned_slots.get(slot)
+                if typ is not None:
+                    self.builder.call(self.drop_functions[typ],[self.builder.load(slot)])
+                    self.builder.store(ir.Constant(TYPES[typ],None),slot)
     def string_constant(self,text):
         data=text.encode('utf-8')+b'\x00'
         typ=ir.ArrayType(ir.IntType(8),len(data))
@@ -127,9 +140,17 @@ class Compiler:
         if isinstance(e,Name):
             slot=self.lookup(e.name)[0]
             value=b.load(slot)
-            if e.typ=='BoxInt': b.store(ir.Constant(BOX,None),slot)
+            if e.typ in OWNED_TYPES: b.store(ir.Constant(TYPES[e.typ],None),slot)
             return value
         if isinstance(e,Call):
+            if e.name in self.text_functions:
+                if e.name=='text': args=[self.value(e.args[0])]
+                elif e.name=='text_byte':
+                    index=self.value(e.args[1])
+                    args=[b.load(self.lookup(e.args[0].name)[0]),index]
+                else: args=[b.load(self.lookup(arg.name)[0]) for arg in e.args]
+                result=b.call(self.text_functions[e.name],args)
+                return b.icmp_signed('!=',result,ir.Constant(I32,0)) if e.name=='text_equal' else result
             if e.name=='read_int': return b.call(self.read_int,[])
             if e.name=='try_read_int':
                 status=b.call(self.try_read_int,[b.load(self.lookup(e.args[0].name)[0])])
@@ -186,12 +207,14 @@ class Compiler:
             if isinstance(s,Decl):
                 v=self.value(s.value)
                 slot=self.allocations.alloca(v.type,name=s.name)
-                if v.type==BOX: self.allocations.store(ir.Constant(BOX,None),slot)
+                if s.value.typ in OWNED_TYPES:
+                    self.owned_slots[slot]=s.value.typ
+                    self.allocations.store(ir.Constant(v.type,None),slot)
                 b.store(v,slot); self.scopes[-1][s.name]=(slot,s.mutable)
             elif isinstance(s,Assign):
                 slot,_=self.lookup(s.name)
                 value=self.value(s.value)
-                if s.value.typ=='BoxInt': b.call(self.box_drop,[b.load(slot)])
+                if s.value.typ in OWNED_TYPES: b.call(self.drop_functions[s.value.typ],[b.load(slot)])
                 b.store(value,slot)
             elif isinstance(s,FieldAssign):
                 pointer=self.field_pointer(s.target)
@@ -201,7 +224,7 @@ class Compiler:
                 b.store(self.value(s.value),pointer)
             elif isinstance(s,ExprStmt):
                 value=self.value(s.value)
-                if s.value.typ=='BoxInt': b.call(self.box_drop,[value])
+                if s.value.typ in OWNED_TYPES: b.call(self.drop_functions[s.value.typ],[value])
             elif isinstance(s,Transfer):
                 self.cleanup(self.scopes[self.loops[-1][2]:])
                 b.branch(self.loops[-1][0 if s.kind=='continue' else 1])

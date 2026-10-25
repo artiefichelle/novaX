@@ -80,3 +80,63 @@ int32_t nx_rt_try_read_int(int32_t *owner) {
     if (!owner) nx_rt_fail("invalid BoxInt owner");
     return nx_rt_parse_int(owner);
 }
+
+/* Immutable UTF-8 byte sequences. Each Text is one uniquely owned allocation. */
+typedef struct {
+    int32_t length;
+    unsigned char bytes[];
+} nx_text;
+
+static nx_text *nx_rt_text_alloc(int32_t length) {
+    if (length < 0 || (size_t)length > SIZE_MAX - sizeof(nx_text) - 1)
+        nx_rt_fail("text allocation exceeds size range");
+    nx_text *result = malloc(sizeof(nx_text) + (size_t)length + 1);
+    if (!result) nx_rt_fail("out of memory");
+    result->length = length;
+    result->bytes[length] = 0;
+    return result;
+}
+static void nx_rt_text_check(const nx_text *value) {
+    if (!value) nx_rt_fail("invalid Text owner");
+}
+nx_text *nx_rt_text(const char *literal) {
+    size_t length = strlen(literal);
+    if (length > INT32_MAX) nx_rt_fail("text length exceeds i32 range");
+    nx_text *result = nx_rt_text_alloc((int32_t)length);
+    memcpy(result->bytes, literal, length);
+    return result;
+}
+int32_t nx_rt_text_len(const nx_text *value) {
+    nx_rt_text_check(value);
+    return value->length;
+}
+int32_t nx_rt_text_byte(const nx_text *value, int32_t index) {
+    nx_rt_text_check(value);
+    if (index < 0 || index >= value->length) nx_rt_fail("text byte index out of bounds");
+    return value->bytes[index];
+}
+nx_text *nx_rt_text_concat(const nx_text *a, const nx_text *b) {
+    nx_rt_text_check(a); nx_rt_text_check(b);
+    if (a->length > INT32_MAX - b->length) nx_rt_fail("text length exceeds i32 range");
+    nx_text *result = nx_rt_text_alloc(a->length + b->length);
+    memcpy(result->bytes, a->bytes, (size_t)a->length);
+    memcpy(result->bytes + a->length, b->bytes, (size_t)b->length);
+    return result;
+}
+nx_text *nx_rt_text_clone(const nx_text *value) {
+    nx_rt_text_check(value);
+    nx_text *result = nx_rt_text_alloc(value->length);
+    memcpy(result->bytes, value->bytes, (size_t)value->length);
+    return result;
+}
+int32_t nx_rt_text_equal(const nx_text *a, const nx_text *b) {
+    nx_rt_text_check(a); nx_rt_text_check(b);
+    return a->length == b->length && memcmp(a->bytes, b->bytes, (size_t)a->length) == 0;
+}
+int32_t nx_rt_print_text(const nx_text *value) {
+    nx_rt_text_check(value);
+    if (fwrite(value->bytes, 1, (size_t)value->length, stdout) != (size_t)value->length || putchar('\n') == EOF)
+        nx_rt_fail("text output error");
+    return value->length;
+}
+void nx_rt_text_drop(nx_text *value) { free(value); }

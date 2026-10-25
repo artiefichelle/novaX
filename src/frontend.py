@@ -70,8 +70,9 @@ TOKEN = re.compile(
 )
 KEYWORDS = {'fn', 'let', 'var', 'return', 'if', 'else', 'while', 'break',
             'continue', 'true', 'false', 'int', 'str', 'bool', 'struct', 'new', 'import', 'as', 'pub'}
-TYPES = {'int', 'str', 'bool', 'BoxInt'}
-BUILTINS = {'print', 'printf', 'len', 'to_bool', 'to_int', 'box', 'read_box', 'write_box', 'read_int', 'try_read_int'}
+OWNED_TYPES = {'BoxInt', 'Text'}
+TYPES = {'int', 'str', 'bool'} | OWNED_TYPES
+BUILTINS = {'print', 'printf', 'len', 'to_bool', 'to_int', 'box', 'read_box', 'write_box', 'read_int', 'try_read_int', 'text', 'text_len', 'text_byte', 'text_concat', 'text_clone', 'text_equal', 'print_text'}
 
 
 def lex(source):
@@ -603,7 +604,7 @@ class Analyzer:
             fields = {}
             for member in definition.fields:
                 if member.name in fields: raise CompileError('Duplicate field: ' + member.name, member.span)
-                if member.typ == 'BoxInt' or (member.typ not in TYPES and not isinstance(member.typ, StructType)):
+                if member.typ in OWNED_TYPES or (member.typ not in TYPES and not isinstance(member.typ, StructType)):
                     raise CompileError('Struct fields require primitive or struct types', member.span)
                 fields[member.name] = member.typ
             self.structs[definition.name] = fields
@@ -673,13 +674,13 @@ class Analyzer:
                 return scope[name]
         raise CompileError('Unknown variable: ' + name, span)
 
-    def owner(self, expr):
+    def owner(self, expr, wanted='BoxInt'):
         if not isinstance(expr, Name):
-            raise CompileError('Box borrow requires a named owner', expr.span)
+            raise CompileError('Borrow requires a named owner', expr.span)
         symbol = self.lookup(expr.name, expr.span)
-        if symbol.typ != 'BoxInt': raise CompileError('Expected BoxInt owner', expr.span)
+        if symbol.typ != wanted: raise CompileError('Expected ' + wanted + ' owner', expr.span)
         if not symbol.available: raise CompileError('Use after move: ' + expr.name, expr.span)
-        expr.typ = 'BoxInt'
+        expr.typ = wanted
         return symbol
 
     def set_available(self, name, available):
@@ -706,7 +707,7 @@ class Analyzer:
         # Bindings created inside the loop are dropped rather than carried back.
         for i, scope in enumerate(loop.entry):
             for name, symbol in scope.items():
-                if symbol.typ == 'BoxInt' and symbol.available and not self.scopes[i][name].available:
+                if symbol.typ in OWNED_TYPES and symbol.available and not self.scopes[i][name].available:
                     raise CompileError('Loop backedge requires reinitializing owner: ' + name, span)
 
     def expect(self, expression, wanted, context):
@@ -754,14 +755,27 @@ class Analyzer:
             expr.typ = 'int'
         elif isinstance(expr, Name):
             expr.typ = self.lookup(expr.name, expr.span).typ
-            if expr.typ == 'BoxInt':
-                self.owner(expr)
+            if expr.typ in OWNED_TYPES:
+                self.owner(expr, expr.typ)
                 index = next(i for i in range(len(self.scopes)-1, -1, -1) if expr.name in self.scopes[i])
                 if self.condition_depths and index < self.condition_depths[-1]:
                     raise CompileError('Cannot move an outer owner in a loop condition', expr.span)
                 self.set_available(expr.name, False)
         elif isinstance(expr, Call):
-            if expr.name == 'read_int':
+            if expr.name == 'text':
+                if len(expr.args) != 1: raise CompileError('Wrong number of arguments to text', expr.span)
+                self.expect(expr.args[0], 'str', 'text value')
+                expr.typ = 'Text'
+            elif expr.name in ('text_len', 'text_byte', 'text_concat', 'text_clone', 'text_equal', 'print_text'):
+                count = 2 if expr.name in ('text_byte', 'text_concat', 'text_equal') else 1
+                if len(expr.args) != count: raise CompileError('Wrong number of arguments to ' + expr.name, expr.span)
+                self.owner(expr.args[0], 'Text')
+                if expr.name == 'text_byte':
+                    self.expect(expr.args[1], 'int', 'Text byte index')
+                    self.owner(expr.args[0], 'Text')
+                elif count == 2: self.owner(expr.args[1], 'Text')
+                expr.typ = 'Text' if expr.name in ('text_concat', 'text_clone') else ('bool' if expr.name == 'text_equal' else 'int')
+            elif expr.name == 'read_int':
                 if expr.args: raise CompileError('Wrong number of arguments to read_int', expr.span)
                 expr.typ = 'int'
             elif expr.name == 'try_read_int':
@@ -816,7 +830,7 @@ class Analyzer:
                 self.expect(expr.right, 'bool', 'Operator ' + expr.op)
                 expr.typ = 'bool'
             elif expr.op in ('==', '!=', '<', '>', '<=', '>='):
-                if left == 'BoxInt' or isinstance(left, (ArrayType, StructType)):
+                if left in OWNED_TYPES or isinstance(left, (ArrayType, StructType)):
                     raise CompileError('Aggregates cannot be compared directly', expr.left.span)
                 if expr.op not in ('==', '!=') and left == 'bool':
                     raise CompileError('Ordering requires int or str, got bool', expr.left.span)
@@ -872,7 +886,7 @@ class Analyzer:
                 terminated = True
             elif isinstance(stmt, (Print, ExprStmt)):
                 typ = self.expression(stmt.value)
-                if isinstance(stmt, Print) and (typ == 'BoxInt' or isinstance(typ, (ArrayType, StructType))):
+                if isinstance(stmt, Print) and (typ in OWNED_TYPES or isinstance(typ, (ArrayType, StructType))):
                     raise CompileError('print does not support aggregates; print individual elements or fields', stmt.value.span)
             elif isinstance(stmt, Transfer):
                 if not self.loops:
