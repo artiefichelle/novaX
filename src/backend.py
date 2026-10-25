@@ -15,8 +15,9 @@ class Compiler:
         self.struct_types={}
         for definition in funcs.structs:
             typ=self.module.context.get_identified_type('nx_struct_'+definition.name)
-            typ.set_body(*[TYPES[field.typ] for field in definition.fields])
             self.struct_types[definition.name]=typ
+        for definition in funcs.structs:
+            self.struct_types[definition.name].set_body(*[self.llvm_type(field.typ) for field in definition.fields])
         for fn in funcs.functions:
             self.funcs[fn.name]=ir.Function(self.module,ir.FunctionType(self.llvm_type(fn.returns),[self.llvm_type(arg.typ) for arg in fn.args]),name=fn.name if fn.name=='main' else 'nx_user_'+fn.name)
         self.printf=ir.Function(self.module,ir.FunctionType(I32,[ir.IntType(8).as_pointer()],var_arg=True),name='printf')
@@ -35,6 +36,14 @@ class Compiler:
         return TYPES[typ]
     def field_index(self,base,name):
         return [field.name for field in self.struct_defs[base.typ.name].fields].index(name)
+    def field_pointer(self,target):
+        indices=[]
+        node=target
+        while isinstance(node,Field):
+            indices.append(self.field_index(node.base,node.name))
+            node=node.base
+        slot,_=self.lookup(node.name)
+        return self.builder.gep(slot,[ir.Constant(I32,0)]+[ir.Constant(I32,index) for index in reversed(indices)])
     def generate(self,name,args,body):
         fun=self.funcs[name]; allocations=fun.append_basic_block('allocations'); entry=fun.append_basic_block('entry'); self.allocations=ir.IRBuilder(allocations); self.builder=ir.IRBuilder(entry); self.scopes=[{}]; self.loops=[]
         for parameter,arg in zip(args,fun.args):
@@ -152,8 +161,7 @@ class Compiler:
                 slot,_=self.lookup(s.name)
                 b.store(self.value(s.value),slot)
             elif isinstance(s,FieldAssign):
-                slot,_=self.lookup(s.target.base.name)
-                pointer=b.gep(slot,[ir.Constant(I32,0),ir.Constant(I32,self.field_index(s.target.base,s.target.name))])
+                pointer=self.field_pointer(s.target)
                 b.store(self.value(s.value),pointer)
             elif isinstance(s,IndexAssign):
                 pointer=self.index_pointer(s.target)

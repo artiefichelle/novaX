@@ -553,10 +553,34 @@ class Analyzer:
             fields = {}
             for member in definition.fields:
                 if member.name in fields: raise CompileError('Duplicate field: ' + member.name, member.span)
-                if member.typ not in TYPES:
-                    raise CompileError('Struct fields currently require int, bool or str', member.span)
+                if member.typ not in TYPES and not isinstance(member.typ, StructType):
+                    raise CompileError('Struct fields require primitive or struct types', member.span)
                 fields[member.name] = member.typ
             self.structs[definition.name] = fields
+        definitions = {definition.name: definition for definition in program.structs}
+        sizes = {}
+        heights = {}
+        visiting = set()
+        def layout(name, depth=0):
+            if name in visiting: raise CompileError('Recursive by-value struct: ' + name, definitions[name].span)
+            if name in sizes:
+                if depth + heights[name] > 64: raise CompileError('Struct nesting exceeds 64 levels', definitions[name].span)
+                return sizes[name]
+            if depth > 64: raise CompileError('Struct nesting exceeds 64 levels', definitions[name].span)
+            visiting.add(name)
+            size = 0
+            height = 0
+            for member in definitions[name].fields:
+                self.validate_type(member.typ, member.span)
+                size += layout(member.typ.name, depth+1) if isinstance(member.typ, StructType) else 8
+                if isinstance(member.typ, StructType): height = max(height, heights[member.typ.name]+1)
+                if size > 65536: raise CompileError('Struct storage estimate exceeds 64 KiB', definitions[name].span)
+            visiting.remove(name)
+            if height > 64: raise CompileError('Struct nesting exceeds 64 levels', definitions[name].span)
+            sizes[name] = size
+            heights[name] = height
+            return size
+        for name in self.structs: layout(name)
         for fn in program.functions:
             self.validate_type(fn.returns, fn.span)
             for arg in fn.args: self.validate_type(arg.typ, arg.span)
@@ -713,11 +737,13 @@ class Analyzer:
                 self.expect(stmt.value, symbol.typ, 'Assignment ' + stmt.name)
             elif isinstance(stmt, FieldAssign):
                 self.expression(stmt.target)
-                if not isinstance(stmt.target.base, Name):
+                root = stmt.target.base
+                while isinstance(root, Field): root = root.base
+                if not isinstance(root, Name):
                     raise CompileError('Field assignment requires a named local struct', stmt.target.span)
-                symbol = self.lookup(stmt.target.base.name, stmt.target.span)
+                symbol = self.lookup(root.name, stmt.target.span)
                 if not symbol.mutable:
-                    raise CompileError('Cannot assign to immutable struct: ' + stmt.target.base.name, stmt.target.span)
+                    raise CompileError('Cannot assign to immutable struct: ' + root.name, stmt.target.span)
                 self.expect(stmt.value, stmt.target.typ, 'Field assignment')
             elif isinstance(stmt, IndexAssign):
                 self.expression(stmt.target)
