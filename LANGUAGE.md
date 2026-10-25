@@ -1,4 +1,4 @@
-# Implemented language — NOVA-X 0.10
+# Implemented language — NOVA-X 0.11
 
 This document specifies implemented behavior, not planned features.
 
@@ -16,7 +16,7 @@ fn function_name(argument: int, text: str) -> int {
 
 Parameters are immutable. Calls may precede the function's definition and may
 be recursive. No overloads, default parameters, void returns, external function
-declarations, or imports exist. A function call can be a standalone statement;
+declarations exist. File imports are described below. A function call can be a standalone statement;
 its return value is then discarded. All reachable function exits must return a
 value. The return analysis is conservative: even `while true` requires a return
 after the loop. Statements after an unconditional transfer are rejected.
@@ -109,7 +109,7 @@ function entry. Recursion depth and stack capacity remain host-dependent.
 
 Syntax and semantic errors identify the source file, one-based line and column,
 source excerpt, and a caret marker. Columns count Unicode code points. CRLF
-input is normalized by the CLI when reading text. The compiler validates names,
+input is accepted; diagnostics display source lines without trailing carriage returns. The compiler validates names,
 types, call arities, mutability, returns, and control transfers before optimization
 or LLVM generation, including code on statically skipped logical RHS branches.
 
@@ -205,3 +205,27 @@ storage estimate sums 8 bytes for each primitive leaf field, including each copy
 of a nested struct; the per-struct limit is 65,536 bytes. Empty structs estimate
 zero bytes. This is a compiler resource limit, not a stable ABI size guarantee
 or a total stack limit.
+
+## Modules and visibility (0.11)
+
+An entry source file may import another file using `import "file.nx" as alias;`.
+The path is relative to the importing file; only relative `.nx` paths are accepted.
+Imports are declarations at file scope. Functions and struct definitions can be
+prefixed with `pub`; otherwise they are private to their source module.
+`alias::function(...)`, `alias::Type`, and `new alias::Type {...}` reference public
+names from a direct import. Internal unqualified references resolve within the
+current module. There are no glob imports, reexports, external package resolution,
+network fetching, module initialization statements, or nested alias paths.
+
+Imported files cannot define `main`. The entry file supplies the one program
+entry point. Import cycles and duplicate aliases are errors. Canonical filesystem
+paths identify modules; repeated imports use one definition and the same nominal
+struct identity. All struct fields are accessible when their type is available;
+field-level visibility is not implemented. A public signature or public struct
+cannot expose a private struct type in its defining module.
+
+Every module retains its filename and source spans for diagnostics. Before native
+output is written, the compiler rejects paths equal to any source dependency.
+Imports are ordinary local file reads, not a sandbox. Paths may use `..`; no
+project-root confinement is claimed. Limits are 128 files, depth 32 and 4 MiB
+combined UTF-8 source, alongside the existing per-file limits.

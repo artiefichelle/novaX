@@ -1,7 +1,7 @@
 # Toward a NOVA-X systems language
 
 The user's intended direction is a systems language similar in purpose to C++
-or Rust. A version number does not establish completeness. Version 0.10 is a
+or Rust. A version number does not establish completeness. Version 0.11 is a
 foundation with three primitive types, integer arrays and nested structs, static text, native code generation, and checked
 integer operations. The following capabilities are not implemented.
 
@@ -15,9 +15,19 @@ integer operations. The following capabilities are not implemented.
 4. Choose an explicit ownership/lifetime model before adding mutable references,
    pointers, allocation, deallocation, and FFI. Do not claim Rust-like safety
    without enforcement and adversarial validation.
-5. Define modules, visibility, imports, dependencies, and reproducible builds.
+5. Extend file modules with package/dependency policy, separate compilation,
+   reproducible builds, and an explicit field-visibility design.
 6. Define error handling and the standard library: text, I/O, files, collections,
    command-line arguments, and process/environment access.
+
+## Completed in 0.11
+
+- [x] Relative file imports, explicit aliases, public/private names and qualified calls/types.
+- [x] Canonical deduplication, transitive modules, cycle detection and import resource limits.
+- [x] Imported-source diagnostics and protection against overwriting source dependencies.
+- [x] Multi-file example and module-specific tests.
+- [x] Record the user's choice of automatic reclamation with checked ownership rules;
+  define its initial design work in `OWNERSHIP_DESIGN.md` without claiming implementation.
 
 ## Completed in 0.10
 

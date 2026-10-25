@@ -1,8 +1,10 @@
-# NOVA-X 0.10 compiler architecture and policy
+# NOVA-X 0.11 compiler architecture and policy
 
 ## Pipeline
 
-1. Read UTF-8 source with its filename.
+1. `modules.Loader` reads the entry and import graph, validates visibility,
+   qualifies declarations/references into module namespaces, and preserves each
+   source filename/span. Single-file front-end APIs remain available for unit tests.
 2. `frontend.lex(Source)` produces tokens with source spans.
 3. `frontend.Parser(tokens).parse()` produces a `Program` containing dataclass
    function, parameter, statement, and expression nodes. Parsing does not require
@@ -76,3 +78,11 @@ and computes conservative size/depth limits before code generation. The backend
 predeclares all identified LLVM struct types before setting their bodies, allowing
 forward references. Nested writes lower to GEP paths rooted in a named local
 stack slot. No escaping pointer or source reference is introduced.
+
+## Module lowering
+
+Canonical source paths identify unique units. The loader first resolves every
+reference against unmodified declarations, then qualifies names and merges typed
+syntax for semantic analysis. Imported qualified symbols use a length-prefixed
+LLVM name scheme separate from root `nx_user_` symbols. There is still one linked
+LLVM module and runtime, not separate compilation or a stable library ABI.

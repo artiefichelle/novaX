@@ -1,13 +1,13 @@
-# NOVA-X 0.10 — experimental systems-language compiler
+# NOVA-X 0.11 — experimental systems-language compiler
 
 NOVA-X compiles a small typed language to LLVM IR and native executables via
-Clang. The goal is a systems language; version 0.10 is a tested foundation,
+Clang. The goal is a systems language; version 0.11 is a tested foundation,
 not a complete replacement for C++ or Rust. See `ROADMAP.md` for unfinished work
 and `LANGUAGE.md` for the implemented language rules.
 
 ## Quick start
 
-Clone this repository, or extract `nova-x-compiler-v0.10.zip` and enter `nova-x`.
+Clone this repository, or extract `nova-x-compiler-v0.11.zip` and enter `nova-x`.
 Requirements: Python 3.10+, the dependency in `requirements.txt`, and Clang with
 a C11-capable system toolchain. Native validation was performed on macOS ARM64;
 other targets have not yet been validated.
@@ -23,7 +23,7 @@ python src/novax.py examples/systems.nx -o systems
 python -m unittest discover -s tests -v
 ```
 
-`src/frontend.py`, `src/backend.py`, `src/ranges.py`, and `src/runtime.c` must stay beside `src/novax.py`. Native builds compile both the
+`src/frontend.py`, `src/backend.py`, `src/ranges.py`, `src/modules.py`, and `src/runtime.c` must stay beside `src/novax.py`. Native builds compile both the
 LLVM module and this runtime. `--emit-llvm -o program.ll` writes verified IR;
 link that IR with `src/runtime.c` to build an executable manually.
 
@@ -49,7 +49,41 @@ fn main() -> int {
 }
 ```
 
-## New in 0.10 — nested struct values
+## New in 0.11 — multi-file modules
+
+```text
+import "module_geometry.nx" as geometry;
+fn main() -> int {
+    let p: geometry::Point = new geometry::Point {x: 10, y: 20};
+    print(geometry::shifted(p, 5).x);
+    return 0;
+}
+```
+
+- File-relative `.nx` imports with explicit aliases and `alias::name` references.
+- Functions and struct types are private by default; `pub fn` and `pub struct`
+  expose names to importing modules. Public APIs cannot expose private struct types.
+- Private helpers resolve within their own module. Source files imported through
+  multiple paths/aliases are canonicalized and compiled once.
+- Transitive imports, nominal types shared across aliases, namespace-separated
+  functions, and imported-file diagnostics are supported.
+- Cyclic imports, duplicate aliases, missing files, absolute/non-`.nx` import
+  paths and imported `main` functions are rejected.
+- Resource limits: 128 unique modules, 32 import edges deep, 4 MiB combined source;
+  the existing per-file lexer/parser limits still apply.
+- Native output cannot overwrite any source module in the dependency graph.
+- 108 tests include module visibility, transitive/diamond imports, qualified
+  struct values, source spans, failure cases, and existing native regressions.
+
+Try `python src/novax.py examples/modules_demo.nx -O3 -o modules`, then `./modules`.
+Expected output: `10`, `15` on separate lines. Imported libraries deliberately
+have no `main`; compile the entry file, not the library file.
+
+The selected long-term memory model is automatic reclamation with checked
+ownership/lifetimes, similar in intent to Rust. It is **not implemented** yet.
+See `OWNERSHIP_DESIGN.md` and `COMPLETION.md` for design and remaining work.
+
+## Added in 0.10 — nested struct values
 
 - A struct field may contain another named struct, including forward declarations.
 - Read and write nested fields with paths such as `rectangle.start.x`.
@@ -211,7 +245,7 @@ short-circuit behavior, type errors, text, nested loops, symbol isolation,
 stack-slot placement, and CLI file preservation. Run the suite locally.
 
 Strings refer to immutable static data; no heap allocation or ownership model
-exists yet. Slices, pointers, references, modules, file I/O, a package
+exists yet. Slices, pointers, references, file I/O, a package
 manager, debugger integration, and a formal memory-safety model remain future
 work. Text concatenation and input are not implemented. This compiler is
 experimental and should only compile trusted programs.
